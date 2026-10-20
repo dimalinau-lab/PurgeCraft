@@ -237,6 +237,9 @@ struct PurgeCraftApp {
     update_rx: std::sync::mpsc::Receiver<autoupdater::UpdateStatus>,
     update_tx: std::sync::mpsc::Sender<autoupdater::UpdateStatus>,
     update_modal_open: bool,
+
+    // Responsive UI state
+    sidebar_open: bool,
 }
 
 fn jump_to_regedit(registry_path: &str) {
@@ -536,6 +539,7 @@ impl Default for PurgeCraftApp {
             update_rx,
             update_tx,
             update_modal_open: false,
+            sidebar_open: true,
         }
     }
 }
@@ -1013,22 +1017,31 @@ impl eframe::App for PurgeCraftApp {
             });
         });
 
-        // 2. Main Toolbar (Large action buttons + Search)
+        // 2. Main Toolbar (Responsive & Clean for Windowed Mode)
         egui::TopBottomPanel::top("main_toolbar").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
+                // Sidebar collapse toggle button
+                let side_tip = if self.sidebar_open { "Скрыть боковую панель" } else { "Показать боковую панель" };
+                let side_icon = if self.sidebar_open { "◀" } else { "▶" };
+                if ui.button(RichText::new(side_icon).strong()).on_hover_text(side_tip).clicked() {
+                    self.sidebar_open = !self.sidebar_open;
+                }
+                ui.separator();
+
                 let logo_color = if self.dark_mode {
                     Color32::from_rgb(244, 244, 245)
                 } else {
                     Color32::from_rgb(37, 99, 235)
                 };
                 if let Some(ref logo) = self.brand_logo_tex {
-                    ui.image((logo.id(), egui::vec2(22.0, 22.0)));
-                    ui.add_space(4.0);
+                    ui.image((logo.id(), egui::vec2(20.0, 20.0)));
+                    ui.add_space(2.0);
                 }
-                ui.heading(RichText::new("PurgeCraft").color(logo_color).strong());
-                ui.add_space(14.0);
+                ui.heading(RichText::new("PurgeCraft").color(logo_color).strong().size(16.0));
+                ui.add_space(6.0);
 
+                // Core Mode: Деинсталлятор
                 let uninst_active = self.active_tab == ActiveTab::Uninstaller;
                 let (uninst_fill, uninst_stroke, uninst_text) = if uninst_active {
                     if self.dark_mode {
@@ -1046,9 +1059,7 @@ impl eframe::App for PurgeCraftApp {
 
                 let uninst_title = if self.settings.show_toolbar_labels { "📦 Деинсталлятор" } else { "📦" };
                 let uninst_btn = egui::Button::new(
-                    RichText::new(uninst_title)
-                        .strong()
-                        .color(uninst_text)
+                    RichText::new(uninst_title).strong().color(uninst_text)
                 )
                 .fill(uninst_fill)
                 .stroke(Stroke::new(1.0_f32, uninst_stroke));
@@ -1057,6 +1068,7 @@ impl eframe::App for PurgeCraftApp {
                     self.active_tab = ActiveTab::Uninstaller;
                 }
 
+                // Core Mode: Автозапуск
                 let startup_active = self.active_tab == ActiveTab::Startup;
                 let (startup_fill, startup_stroke, startup_text) = if startup_active {
                     if self.dark_mode {
@@ -1074,9 +1086,7 @@ impl eframe::App for PurgeCraftApp {
 
                 let startup_title = if self.settings.show_toolbar_labels { "⚡ Автозапуск" } else { "⚡" };
                 let startup_btn = egui::Button::new(
-                    RichText::new(startup_title)
-                        .strong()
-                        .color(startup_text)
+                    RichText::new(startup_title).strong().color(startup_text)
                 )
                 .fill(startup_fill)
                 .stroke(Stroke::new(1.0_f32, startup_stroke));
@@ -1085,14 +1095,8 @@ impl eframe::App for PurgeCraftApp {
                     self.active_tab = ActiveTab::Startup;
                 }
 
-                ui.add_space(8.0);
-                let export_label = if self.settings.show_toolbar_labels { "📄 Экспорт HTML" } else { "📄" };
-                if ui.button(export_label).on_hover_text("Экспортировать отчет в HTML").clicked() {
-                    self.export_html();
-                }
-
-                // Install Tracker Button
-                let tracker_title = if self.settings.show_toolbar_labels { "⚡ Установить и следить" } else { "⚡ Следить" };
+                // Install Tracker
+                let tracker_title = if self.settings.show_toolbar_labels { "⚡ Следить" } else { "⚡" };
                 let tracker_btn = egui::Button::new(
                     RichText::new(tracker_title)
                         .strong()
@@ -1101,7 +1105,7 @@ impl eframe::App for PurgeCraftApp {
                 .fill(if self.dark_mode { Color32::from_rgb(66, 32, 6) } else { Color32::from_rgb(254, 243, 199) })
                 .stroke(Stroke::new(1.0_f32, if self.dark_mode { Color32::from_rgb(202, 138, 4) } else { Color32::from_rgb(245, 158, 11) }));
 
-                if ui.add(tracker_btn).on_hover_text("Монитор установки (Install Tracker): фиксирует все создаваемые файлы и ключи реестра для 100% чистого удаления").clicked() {
+                if ui.add(tracker_btn).on_hover_text("Монитор установки (Install Tracker): отслеживать установку для 100% чистого удаления").clicked() {
                     self.tracker_installer_path.clear();
                     self.tracker_app_name.clear();
                     self.tracker_traces.clear();
@@ -1110,56 +1114,97 @@ impl eframe::App for PurgeCraftApp {
                     self.tracker_modal_open = true;
                 }
 
-                // GPU Shader Cache Cleaner Button
-                let shader_btn = egui::Button::new(
-                    RichText::new("🎮 Шейдеры GPU")
-                        .strong()
-                        .color(if self.dark_mode { Color32::from_rgb(192, 132, 252) } else { Color32::from_rgb(126, 34, 206) })
-                )
-                .fill(if self.dark_mode { Color32::from_rgb(46, 16, 77) } else { Color32::from_rgb(243, 232, 255) })
-                .stroke(Stroke::new(1.0_f32, if self.dark_mode { Color32::from_rgb(168, 85, 247) } else { Color32::from_rgb(192, 132, 252) }));
+                // Adaptive Tools: In wide window show buttons inline; in windowed/narrow mode group into clean dropdown
+                let avail_w = ui.available_width();
+                if avail_w > 560.0 {
+                    let shader_btn = egui::Button::new(
+                        RichText::new("🎮 Шейдеры")
+                            .strong()
+                            .color(if self.dark_mode { Color32::from_rgb(192, 132, 252) } else { Color32::from_rgb(126, 34, 206) })
+                    )
+                    .fill(if self.dark_mode { Color32::from_rgb(46, 16, 77) } else { Color32::from_rgb(243, 232, 255) })
+                    .stroke(Stroke::new(1.0_f32, if self.dark_mode { Color32::from_rgb(168, 85, 247) } else { Color32::from_rgb(192, 132, 252) }));
 
-                if ui.add(shader_btn).on_hover_text("Очистить гигабайты кэшей шейдеров DirectX, NVIDIA, AMD и Vulkan").clicked() {
-                    self.shader_locations = scan_shader_caches();
-                    self.shader_clean_msg = None;
-                    self.shader_modal_open = true;
+                    if ui.add(shader_btn).on_hover_text("Очистить кэши шейдеров DirectX, NVIDIA, AMD и Vulkan").clicked() {
+                        self.shader_locations = scan_shader_caches();
+                        self.shader_clean_msg = None;
+                        self.shader_modal_open = true;
+                    }
+
+                    if ui.button("🗄 PATH").on_hover_text("Санитайзер переменных среды PATH").clicked() {
+                        self.path_entries = scan_path_entries();
+                        self.path_msg = None;
+                        self.path_modal_open = true;
+                    }
+
+                    if ui.button("🧬 Дубликаты").on_hover_text("Детектор дублирующихся версий Visual C++, Java и .NET").clicked() {
+                        self.runtime_groups = detect_runtime_duplicates(&self.apps);
+                        self.runtime_msg = None;
+                        self.runtime_modal_open = true;
+                    }
+
+                    if ui.button("🚀 Winget").on_hover_text("Менеджер пакетов Winget").clicked() {
+                        self.winget_packages = scan_winget_packages();
+                        self.winget_msg = None;
+                        self.winget_modal_open = true;
+                    }
+
+                    if ui.button("📄 HTML").on_hover_text("Экспортировать отчет в HTML").clicked() {
+                        self.export_html();
+                    }
+                } else {
+                    ui.menu_button("🛠 Утилиты ▾", |ui| {
+                        if ui.button("🎮 Шейдеры GPU...").clicked() {
+                            self.shader_locations = scan_shader_caches();
+                            self.shader_clean_msg = None;
+                            self.shader_modal_open = true;
+                            ui.close_menu();
+                        }
+                        if ui.button("🗄 Санитайзер PATH...").clicked() {
+                            self.path_entries = scan_path_entries();
+                            self.path_msg = None;
+                            self.path_modal_open = true;
+                            ui.close_menu();
+                        }
+                        if ui.button("🧬 Анализатор дубликатов VC++/Java...").clicked() {
+                            self.runtime_groups = detect_runtime_duplicates(&self.apps);
+                            self.runtime_msg = None;
+                            self.runtime_modal_open = true;
+                            ui.close_menu();
+                        }
+                        if ui.button("🚀 Менеджер Winget...").clicked() {
+                            self.winget_packages = scan_winget_packages();
+                            self.winget_msg = None;
+                            self.winget_modal_open = true;
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button("📄 Экспорт списка в HTML...").clicked() {
+                            self.export_html();
+                            ui.close_menu();
+                        }
+                    });
                 }
 
-                if ui.button("🗄 PATH").on_hover_text("Санитайзер переменных среды PATH: поиск и удаление мертвых путей").clicked() {
-                    self.path_entries = scan_path_entries();
-                    self.path_msg = None;
-                    self.path_modal_open = true;
-                }
-
-                if ui.button("🧬 Дубликаты").on_hover_text("Детектор дублирующихся и устаревших версий Visual C++, Java и .NET").clicked() {
-                    self.runtime_groups = detect_runtime_duplicates(&self.apps);
-                    self.runtime_msg = None;
-                    self.runtime_modal_open = true;
-                }
-
-                if ui.button("🚀 Winget").on_hover_text("Менеджер пакетов Winget: проверка обновлений и тихое удаление").clicked() {
-                    self.winget_packages = scan_winget_packages();
-                    self.winget_msg = None;
-                    self.winget_modal_open = true;
-                }
-
-                // Theme Toggle Button
-                let theme_btn_label = if self.dark_mode { "☀ Светлая" } else { "🌙 Темная" };
-                if ui.button(theme_btn_label).on_hover_text("Переключить тему оформления (Светлая / Темная)").clicked() {
-                    self.dark_mode = !self.dark_mode;
-                }
-
-                // Search box on right
+                // Right aligned search and compact theme toggle
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let theme_icon = if self.dark_mode { "☀" } else { "🌙" };
+                    let theme_tip = if self.dark_mode { "Переключить на светлую тему" } else { "Переключить на темную тему" };
+                    if ui.button(theme_icon).on_hover_text(theme_tip).clicked() {
+                        self.dark_mode = !self.dark_mode;
+                    }
+
                     if !self.search_query.is_empty() {
                         if ui.button("✕").on_hover_text("Очистить поиск (Esc)").clicked() {
                             self.search_query.clear();
                         }
                     }
+
+                    let search_w = (ui.available_width() - 24.0).clamp(100.0, 180.0);
                     let search_box = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .hint_text("Поиск программ... (Ctrl+F, Esc)")
-                            .desired_width(220.0)
+                            .hint_text("Поиск... (Ctrl+F)")
+                            .desired_width(search_w)
                     );
                     if self.focus_search_requested {
                         search_box.request_focus();
@@ -1178,7 +1223,7 @@ impl eframe::App for PurgeCraftApp {
         if self.active_tab == ActiveTab::Uninstaller {
             egui::TopBottomPanel::top("category_bar").show(ctx, |ui| {
                 ui.add_space(3.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let total_all = self.apps.len();
                     let total_user = self.apps.iter().filter(|a| !a.is_system_component && !a.is_uwp && a.source_badge != "[Portable]").count();
                     let total_sys = self.apps.iter().filter(|a| a.is_system_component).count();
@@ -1252,7 +1297,7 @@ impl eframe::App for PurgeCraftApp {
         } else if self.active_tab == ActiveTab::Startup {
             egui::TopBottomPanel::top("startup_category_bar").show(ctx, |ui| {
                 ui.add_space(3.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let total_all = self.startup_items.len();
                     let total_reg = self.startup_items.iter().filter(|i| i.source_type.contains("run")).count();
                     let total_sm = self.startup_items.iter().filter(|i| i.source_type == "startmenu").count();
@@ -1495,17 +1540,20 @@ impl PurgeCraftApp {
             Color32::WHITE
         };
 
-        // Left ExplorerBar (TaskPane)
-        egui::SidePanel::left("explorer_task_pane")
-            .exact_width(280.0)
-            .resizable(false)
-            .frame(
-                egui::Frame::none()
-                    .fill(pane_fill)
-                    .stroke(Stroke::new(1.0_f32, pane_stroke))
-                    .inner_margin(12.0)
-            )
-            .show_inside(ui, |ui| {
+        // Left ExplorerBar (TaskPane) - Resizable & Collapsible for Windowed Mode
+        if self.sidebar_open {
+            egui::SidePanel::left("explorer_task_pane")
+                .default_width(240.0)
+                .min_width(190.0)
+                .max_width(340.0)
+                .resizable(true)
+                .frame(
+                    egui::Frame::none()
+                        .fill(pane_fill)
+                        .stroke(Stroke::new(1.0_f32, pane_stroke))
+                        .inner_margin(8.0)
+                )
+                .show_inside(ui, |ui| {
                 if self.batch_selected.len() > 1 {
                     // BATCH OPERATIONS PANEL
                     let batch_count = self.batch_selected.len();
@@ -1761,6 +1809,7 @@ impl PurgeCraftApp {
                     ui.label("Выберите программу из списка для просмотра сведений и действий.");
                 }
             });
+        }
 
         // Right Main Table Area
         egui::Frame::none()
@@ -1788,12 +1837,12 @@ impl PurgeCraftApp {
                         .striped(true)
                         .resizable(true)
                         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                        .column(Column::exact(34.0))                    // Batch Checkbox Column
-                        .column(Column::initial(340.0).at_least(220.0)) // Program Name (Resizable!)
-                        .column(Column::exact(95.0))                    // Size
-                        .column(Column::exact(110.0))                   // Date
-                        .column(Column::initial(170.0).at_least(110.0)) // Publisher (Resizable!)
-                        .column(Column::remainder().at_least(130.0))    // Type / Arch (LAST COLUMN gets remainder!)
+                        .column(Column::exact(32.0))                    // Batch Checkbox Column
+                        .column(Column::initial(260.0).at_least(140.0)) // Program Name (Resizable!)
+                        .column(Column::exact(85.0))                    // Size
+                        .column(Column::exact(95.0))                    // Date
+                        .column(Column::initial(150.0).at_least(80.0))  // Publisher (Resizable!)
+                        .column(Column::remainder().at_least(85.0))     // Type / Arch
                         .header(30.0, |mut header| {
                             // Column 0: Checkbox Header
                             header.col(|ui| {
@@ -3414,12 +3463,13 @@ impl PurgeCraftApp {
                                     if self.dark_mode { Color32::from_rgb(161, 161, 170) } else { Color32::from_rgb(71, 85, 105) },
                                 )
                             };
+                            let tab_w = ((ui.available_width() - 12.0) / 3.0).floor().max(100.0);
                             let btn = egui::Button::new(
                                 RichText::new(format!("{} {}", icon, label)).strong().color(text_color)
                             )
                             .fill(fill)
                             .stroke(stroke)
-                            .min_size(Vec2::new(145.0, 32.0));
+                            .min_size(Vec2::new(tab_w, 34.0));
                             ui.add(btn)
                         };
 
@@ -3615,20 +3665,25 @@ impl PurgeCraftApp {
                     ui.separator();
                     ui.add_space(6.0);
 
-                    // 3. Bottom Button Row
+                    // 3. Bottom Button Row (Harmonious unified sizes)
+                    let btn_size = Vec2::new(92.0, 28.0);
                     ui.horizontal(|ui| {
-                        if ui.button("❓ Помощь").on_hover_text("Открыть справку по настройкам").clicked() {
-                            let _ = open::that("https://github.com/dimal/PurgeCraft");
+                        let help_btn = egui::Button::new(RichText::new("❓ Помощь").strong())
+                            .min_size(btn_size);
+                        if ui.add(help_btn).on_hover_text("Открыть документацию PurgeCraft на GitHub").clicked() {
+                            let _ = open::that(format!("https://github.com/{}", self.settings.github_repo));
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Отмена").clicked() {
+                            let cancel_btn = egui::Button::new(RichText::new("Отмена").strong())
+                                .min_size(btn_size);
+                            if ui.add(cancel_btn).clicked() {
                                 do_cancel = true;
                             }
 
                             let ok_btn = egui::Button::new(RichText::new("ОК").strong().color(Color32::WHITE))
                                 .fill(if self.dark_mode { Color32::from_rgb(37, 99, 235) } else { Color32::from_rgb(2, 132, 199) })
-                                .min_size(Vec2::new(75.0, 24.0));
+                                .min_size(btn_size);
                             if ui.add(ok_btn).clicked() {
                                 do_save = true;
                             }
