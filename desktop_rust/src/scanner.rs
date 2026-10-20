@@ -3384,18 +3384,11 @@ Antigravity 2.19.1                                           Google.Antigravity 
 
     #[test]
     fn test_steam_games_scan() {
-        let win32_apps = scan_win32_apps();
-        if let Some(hitler) = win32_apps.iter().find(|a| a.name.contains("Hitler Hates Anime")) {
-            println!("Hitler Hates Anime: Location='{}', Size={} bytes ({:.2} MB)", hitler.install_location, hitler.size_bytes, hitler.size_bytes as f64 / (1024.0 * 1024.0));
-            assert!(hitler.install_location.to_lowercase().contains("hitler hates anime"));
-            assert!(!hitler.install_location.to_lowercase().contains(r"steam\games"));
-            assert!(hitler.size_bytes > 800_000_000);
-        }
-
         let steam_apps = scan_steam_library_games(&[]);
         println!("Discovered {} Steam games across library folders", steam_apps.len());
         for g in &steam_apps {
-            println!("Steam Game: {} (Drive {}, Size {:.2} GB)", g.name, get_app_drive_letter(g), g.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0));
+            println!("Steam Game: {} (Drive {}, Size {:.2} GB, Location: {})", g.name, get_app_drive_letter(g), g.size_bytes as f64 / (1024.0 * 1024.0 * 1024.0), g.install_location);
+            assert!(!g.install_location.to_lowercase().contains(r"steam\games"), "Steam game install location should never be icon cache folder");
         }
     }
 
