@@ -10,6 +10,8 @@ pub struct AppSettings {
     pub explorer_context_menu: bool,
     pub check_updates: bool,
     pub check_beta: bool,
+    #[serde(default = "default_github_repo")]
+    pub github_repo: String,
     pub show_in_control_panel: bool,
     pub use_total_commander: bool,
     pub language: String,
@@ -34,6 +36,10 @@ fn default_text_scale() -> f32 {
     1.15
 }
 
+fn default_github_repo() -> String {
+    "PurgeCraft/PurgeCraft".to_string()
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
@@ -41,6 +47,7 @@ impl Default for AppSettings {
             explorer_context_menu: false,
             check_updates: true,
             check_beta: false,
+            github_repo: default_github_repo(),
             show_in_control_panel: true,
             use_total_commander: false,
             language: "Russian (Русский)".to_string(),

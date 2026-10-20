@@ -1,46 +1,46 @@
-name: Release
+name: Release PurgeCraft
 
 on:
   push:
     tags:
-      - 'v*'
-  workflow_dispatch:
+      - 'v*.*.*'
 
 permissions:
   contents: write
 
 jobs:
-  build-release:
-    name: Build & Publish Release
+  build-and-release:
+    name: Build & Release Windows Binary
     runs-on: windows-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
 
-      - name: Build Release Binary
-        run: cargo build --release --bin purgecraft --manifest-path desktop_rust/Cargo.toml
+      - name: Build Release Executable
+        run: cargo build --manifest-path desktop_rust/Cargo.toml --release
 
-      - name: Package Release
+      - name: Package Assets & Calculate Checksums
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
-          Copy-Item desktop_rust/target/release/purgecraft.exe dist/PurgeCraft.exe
-          Compress-Archive -Path dist/PurgeCraft.exe -DestinationPath dist/PurgeCraft-Windows-x64.zip
-          $hash = (Get-FileHash dist/PurgeCraft-Windows-x64.zip -Algorithm SHA256).Hash
-          "$hash  PurgeCraft-Windows-x64.zip" | Out-File -FilePath dist/SHA256SUMS.txt -Encoding utf8
+          Copy-Item "desktop_rust/target/release/PurgeCraft.exe" "PurgeCraft.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 "PurgeCraft.exe").Hash.ToLower()
+          "$hash  PurgeCraft.exe" | Out-File -Encoding utf8 SHA256SUMS.txt
+          Write-Host "SHA256: $hash"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            dist/PurgeCraft.exe
-            dist/PurgeCraft-Windows-x64.zip
-            dist/SHA256SUMS.txt
+            PurgeCraft.exe
+            SHA256SUMS.txt
           generate_release_notes: true
           draft: false
           prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
