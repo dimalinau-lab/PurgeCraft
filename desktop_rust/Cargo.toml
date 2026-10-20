@@ -1,0 +1,25 @@
+[package]
+name = "purgecraft"
+version = "1.0.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.30"
+egui_extras = "0.30"
+winreg = "0.52"
+open = "5.3"
+chrono = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[[bin]]
+name = "purgecraft"
+path = "src/main.rs"
+
+[[bin]]
+name = "setup_test"
+path = "src/setup_test.rs"
+
+[build-dependencies]
+winres = "0.1"
+

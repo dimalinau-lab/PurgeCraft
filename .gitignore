@@ -1,0 +1,43 @@
+# ====================================================================
+# Build outputs, executables & compiled binaries
+# ====================================================================
+target/
+**/target/
+*.exe
+*.dll
+*.so
+*.dylib
+*.pdb
+*.zip
+*.tar.gz
+*.7z
+dist/
+
+# ====================================================================
+# Local runtime files, user configs, logs & audits
+# ====================================================================
+*.log
+*.json
+*.html
+logs/
+
+# ====================================================================
+# Scratch, research, non-code assets & tool folders
+# ====================================================================
+icons/
+replica/
+target-app/
+.agents/
+/icon.ico
+/icon.png
+
+# ====================================================================
+# IDE, OS & editor files
+# ====================================================================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db
+desktop.ini

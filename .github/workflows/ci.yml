@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    name: Build & Test (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "desktop_rust -> desktop_rust/target"
+
+      - name: Run Cargo Check
+        run: cargo check --manifest-path desktop_rust/Cargo.toml
+
+      - name: Run Unit Tests
+        run: cargo test --manifest-path desktop_rust/Cargo.toml -- --nocapture
