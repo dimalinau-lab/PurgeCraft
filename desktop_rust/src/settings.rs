@@ -37,7 +37,7 @@ fn default_text_scale() -> f32 {
 }
 
 fn default_github_repo() -> String {
-    "PurgeCraft/PurgeCraft".to_string()
+    "dimalinau-lab/PurgeCraft".to_string()
 }
 
 impl Default for AppSettings {
