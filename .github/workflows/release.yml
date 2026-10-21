@@ -44,6 +44,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          name: PurgeCraft ${{ github.ref_name }}
           files: |
             PurgeCraft.exe
             PurgeCraft.zip
