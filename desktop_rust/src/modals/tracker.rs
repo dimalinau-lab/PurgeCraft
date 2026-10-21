@@ -8,8 +8,9 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
+    let lang = app.lang();
     let mut is_open = true;
-    egui::Window::new("Установить и следить за программой")
+    egui::Window::new(crate::i18n::t(lang, "Установить и следить за программой", "Install and Track Program"))
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
@@ -21,16 +22,21 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             match app.tracker_step {
                 TrackerStep::SelectInstaller => {
-                    ui.heading("Установка программы с отслеживанием");
+                    ui.heading(crate::i18n::t(lang, "Установка программы с отслеживанием", "Program Installation with Tracking"));
                     ui.add_space(6.0);
-                    ui.label("PurgeCraft зафиксирует снимок реестра и файловой системы до установки, запустит инсталлятор, а затем определит все добавленные ключи, ветки и папки. Это гарантирует 100% чистое удаление в будущем.");
+                    ui.label(crate::i18n::t(
+                        lang,
+                        "PurgeCraft зафиксирует снимок реестра и файловой системы до установки, запустит инсталлятор, а затем определит все добавленные ключи, ветки и папки. Это гарантирует 100% чистое удаление в будущем.",
+                        "PurgeCraft will take a snapshot of the registry and filesystem before installation, run the installer, and then record all added keys, entries, and folders. This ensures 100% clean uninstallation in the future."
+                    ));
                     ui.add_space(12.0);
 
-                    ui.label("Путь к инсталлятору (.exe, .msi):");
+                    ui.label(crate::i18n::t(lang, "Путь к инсталлятору (.exe, .msi):", "Path to installer (.exe, .msi):"));
                     ui.horizontal(|ui| {
                         ui.add(egui::TextEdit::singleline(&mut app.tracker_installer_path).desired_width(420.0));
-                        if ui.button("📁 Обзор...").clicked() {
-                            if let Some(p) = pick_file_dialog("Инсталляторы", "*.exe;*.msi") {
+                        if ui.button(crate::i18n::t(lang, "📁 Обзор...", "📁 Browse...")).clicked() {
+                            let filter_name = crate::i18n::t(lang, "Инсталляторы", "Installers");
+                            if let Some(p) = pick_file_dialog(filter_name, "*.exe;*.msi") {
                                 if app.tracker_app_name.is_empty() {
                                     if let Some(stem) = std::path::Path::new(&p).file_stem() {
                                         app.tracker_app_name = stem.to_string_lossy().to_string();
@@ -42,16 +48,17 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     });
 
                     ui.add_space(8.0);
-                    ui.label("Название программы:");
+                    ui.label(crate::i18n::t(lang, "Название программы:", "Application name:"));
                     ui.add(egui::TextEdit::singleline(&mut app.tracker_app_name).desired_width(420.0));
 
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
                             app.tracker_modal_open = false;
                         }
                         let can_start = !app.tracker_installer_path.trim().is_empty() && std::path::Path::new(&app.tracker_installer_path).exists();
-                        if ui.add_enabled(can_start, egui::Button::new(RichText::new("▶ Начать снимок и запустить установку").strong().color(Color32::WHITE))).clicked() {
+                        let start_label = crate::i18n::t(lang, "▶ Начать снимок и запустить установку", "▶ Begin Snapshot & Run Installer");
+                        if ui.add_enabled(can_start, egui::Button::new(RichText::new(start_label).strong().color(Color32::WHITE))).clicked() {
                             let snap = take_system_snapshot();
                             app.tracker_snapshot_before = Some(snap);
                             app.tracker_live_log.clear();
@@ -64,7 +71,7 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                     app.tracker_step = TrackerStep::Installing;
                                 }
                                 Err(e) => {
-                                    app.status_msg = format!("Ошибка запуска: {}", e);
+                                    app.status_msg = format!("{}: {}", crate::i18n::t(lang, "Ошибка запуска", "Launch error"), e);
                                 }
                             }
                         }
@@ -76,13 +83,13 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("📦").size(22.0));
-                        ui.heading(RichText::new("Установить и следить за программой").size(15.0).strong());
+                        ui.heading(RichText::new(crate::i18n::t(lang, "Установить и следить за программой", "Install and Track Program")).size(15.0).strong());
                     });
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Прогресс установки:").strong().size(12.5));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Прогресс установки:", "Installation progress:")).strong().size(12.5));
                     ui.add_space(4.0);
 
-                    // Dark Terminal Log Box (exact 1:1 match with Screenshot 2)
+                    // Dark Terminal Log Box
                     let log_bg = if app.dark_mode { Color32::from_rgb(15, 17, 23) } else { Color32::from_rgb(15, 23, 42) };
                     let border_color = if app.dark_mode { Color32::from_rgb(60, 64, 75) } else { Color32::from_rgb(51, 65, 85) };
 
@@ -109,8 +116,8 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                             ui.allocate_ui_with_layout(Vec2::new(110.0, 16.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                                 if !entry.action.is_empty() {
                                                     let act_color = match entry.action.as_str() {
-                                                        "Создана папка" => Color32::from_rgb(234, 179, 8),
-                                                        "Создан ключ реестра" | "Запись реестра" => Color32::from_rgb(168, 85, 247),
+                                                        "Создана папка" | "Folder Created" => Color32::from_rgb(234, 179, 8),
+                                                        "Создан ключ реестра" | "Запись реестра" | "Registry Key Created" | "Registry Entry" => Color32::from_rgb(168, 85, 247),
                                                         _ => Color32::from_rgb(56, 189, 248),
                                                     };
                                                     ui.label(RichText::new(&entry.action).monospace().size(11.5).color(act_color));
@@ -132,20 +139,20 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let stop_btn = egui::Button::new(RichText::new("Стоп").size(12.5))
+                            let stop_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Стоп", "Stop")).size(12.5))
                                 .min_size(Vec2::new(75.0, 26.0));
-                            if ui.add(stop_btn).on_hover_text("Остановить монитор установки").clicked() {
+                            if ui.add(stop_btn).on_hover_text(crate::i18n::t(lang, "Остановить монитор установки", "Stop installation monitor")).clicked() {
                                 abort_tracking = true;
                             }
 
                             let finish_btn = egui::Button::new(
-                                RichText::new("Установить и следить").size(12.5).strong().color(Color32::WHITE)
+                                RichText::new(crate::i18n::t(lang, "Установить и следить", "Install & Track")).size(12.5).strong().color(Color32::WHITE)
                             )
                             .fill(if app.dark_mode { Color32::from_rgb(45, 52, 65) } else { Color32::from_rgb(30, 41, 59) })
                             .stroke(Stroke::new(1.0_f32, Color32::from_rgb(75, 85, 99)))
                             .min_size(Vec2::new(175.0, 26.0));
 
-                            if ui.add(finish_btn).on_hover_text("Завершить отслеживание и зафиксировать созданные следы").clicked() {
+                            if ui.add(finish_btn).on_hover_text(crate::i18n::t(lang, "Завершить отслеживание и зафиксировать созданные следы", "Finish tracking and capture installed leftovers")).clicked() {
                                 finish_tracking = true;
                             }
                         });
@@ -175,14 +182,24 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     }
                 }
                 TrackerStep::ReviewTraces => {
-                    ui.heading(format!("Следы установки «{}»", app.tracker_app_name));
+                    let title = format!(
+                        "{} «{}»",
+                        crate::i18n::t(lang, "Следы установки", "Installation traces for"),
+                        app.tracker_app_name
+                    );
+                    ui.heading(title);
                     ui.add_space(4.0);
-                    ui.label(format!("Зафиксировано новых элементов в системе: {}", app.tracker_traces.len()));
+                    let count_text = format!(
+                        "{}: {}",
+                        crate::i18n::t(lang, "Зафиксировано новых элементов в системе", "New system elements captured"),
+                        app.tracker_traces.len()
+                    );
+                    ui.label(count_text);
                     ui.separator();
 
                     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                         if app.tracker_traces.is_empty() {
-                            ui.label("Новых файлов или ключей реестра не зафиксировано.");
+                            ui.label(crate::i18n::t(lang, "Новых файлов или ключей реестра не зафиксировано.", "No new files or registry keys were detected."));
                         } else {
                             for t in &app.tracker_traces {
                                 let icon = if t.trace_type == "registry_key" { "🗄" } else { "📁" };
@@ -194,10 +211,11 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.separator();
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button("Отмена").clicked() {
+                        if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
                             app.tracker_modal_open = false;
                         }
-                        if ui.button(RichText::new("💾 Сохранить в базу отслеженных программ").strong().color(Color32::WHITE)).clicked() {
+                        let save_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "💾 Сохранить в базу отслеженных программ", "💾 Save to Tracked Programs Database")).strong().color(Color32::WHITE));
+                        if ui.add(save_btn).clicked() {
                             let now = chrono::Local::now().format("%Y-%m-%d").to_string();
                             let traced = TracedApp {
                                 id: format!("traced_{}_{}", app.tracker_app_name, app.tracker_traces.len()),
@@ -208,7 +226,14 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             };
                             app.traced_apps.push(traced);
                             save_traced_apps(&app.traced_apps);
-                            app.status_msg = format!("Программа «{}» успешно зарегистрирована как отслеженная ({} следов).", app.tracker_app_name, app.tracker_traces.len());
+                            app.status_msg = format!(
+                                "{} «{}» {} ({} {}).",
+                                crate::i18n::t(lang, "Программа", "Program"),
+                                app.tracker_app_name,
+                                crate::i18n::t(lang, "успешно зарегистрирована как отслеженная", "successfully registered as tracked"),
+                                app.tracker_traces.len(),
+                                crate::i18n::t(lang, "следов", "traces")
+                            );
                             app.tracker_modal_open = false;
                             app.refresh_data();
                         }

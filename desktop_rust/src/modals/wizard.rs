@@ -1,7 +1,7 @@
 use std::process::Command;
 use eframe::egui::{self, Color32, RichText};
 use crate::app::PurgeCraftApp;
-use crate::types::{WizardPhase, format_size, truncate_chars};
+use crate::types::{WizardPhase, format_size_lang, truncate_chars};
 use crate::scanner::{export_traces_to_xml, spawn_delete_leftovers_stream};
 
 pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
@@ -9,9 +9,10 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
+    let lang = app.lang();
     let mut close_wizard = false;
 
-    egui::Window::new(format!("Удаление остатков {} — Мастер Удаления ™", app.wizard_app_title))
+    egui::Window::new(format!("{} {} — {}", crate::i18n::t(lang, "Удаление остатков", "Leftovers Removal"), app.wizard_app_title, crate::i18n::t(lang, "Мастер Удаления ™", "Removal Wizard ™")))
         .id(egui::Id::new("wizard_traces_modal"))
         .collapsible(false)
         .resizable(true)
@@ -23,7 +24,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             match app.wizard_phase {
                 WizardPhase::Scanning => {
-                    ui.heading(RichText::new("Сканирование оставшихся файлов/папок, элементов реестра...").size(15.0).strong());
+                    ui.heading(RichText::new(crate::i18n::t(lang, "Сканирование оставшихся файлов/папок, элементов реестра...", "Scanning for leftover files/folders, registry entries...")).size(15.0).strong());
                     ui.add_space(8.0);
                     ui.label(RichText::new(truncate_chars(&app.wizard_scan_current_path, 75)).monospace().small());
                     ui.add_space(12.0);
@@ -36,28 +37,35 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Отмена").clicked() {
+                            if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
                                 close_wizard = true;
                             }
                         });
                     });
                 }
                 WizardPhase::Review => {
-                    ui.label(RichText::new(format!("Принудительное удаление '{}'", app.wizard_app_title)).heading().strong());
+                    ui.label(RichText::new(format!("{} '{}'", crate::i18n::t(lang, "Принудительное удаление", "Force removal of"), app.wizard_app_title)).heading().strong());
                     ui.add_space(4.0);
-                    ui.label("Uninstall Tool обнаружила, что следующие части данной программы все еще остались на вашем компьютере. Просмотрите внимательно выбранные элементы прежде, чем вы их решите удалить, нажав кнопку 'Удалить'.");
+                    ui.label(crate::i18n::t(
+                        lang,
+                        "PurgeCraft обнаружила, что следующие части данной программы все еще остались на вашем компьютере. Просмотрите внимательно выбранные элементы прежде, чем вы их решите удалить, нажав кнопку 'Удалить'.",
+                        "PurgeCraft detected that the following parts of this program still remain on your computer. Review the selected items carefully before removing them by clicking 'Delete'."
+                    ));
                     ui.add_space(10.0);
 
                     // Action buttons top row
                     ui.horizontal(|ui| {
-                        if ui.button("📄 Экспортировать в XML").on_hover_text("Экспортировать список остатков в XML-файл").clicked() {
+                        if ui.button(crate::i18n::t(lang, "📄 Экспортировать в XML", "📄 Export to XML"))
+                            .on_hover_text(crate::i18n::t(lang, "Экспортировать список остатков в XML-файл", "Export leftover list to an XML file"))
+                            .clicked()
+                        {
                             match export_traces_to_xml(&app.wizard_app_title, &app.wizard_traces) {
                                 Ok(path) => {
                                     let _ = Command::new("notepad.exe").arg(&path).spawn();
-                                    app.wizard_xml_status = Some("Экспорт завершен (открыт в Блокноте)".to_string());
+                                    app.wizard_xml_status = Some(crate::i18n::t(lang, "Экспорт завершен (открыт в Блокноте)", "Export completed (opened in Notepad)").to_string());
                                 }
                                 Err(e) => {
-                                    app.wizard_xml_status = Some(format!("Ошибка экспорта: {}", e));
+                                    app.wizard_xml_status = Some(format!("{}: {}", crate::i18n::t(lang, "Ошибка экспорта", "Export error"), e));
                                 }
                             }
                         }
@@ -66,11 +74,11 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button("Отмена").clicked() {
+                            if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
                                 close_wizard = true;
                             }
                             let selected_count = app.wizard_traces.iter().filter(|t| t.selected).count();
-                            let del_btn = egui::Button::new(RichText::new("Удалить").strong().color(Color32::WHITE))
+                            let del_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Удалить", "Delete")).strong().color(Color32::WHITE))
                                 .fill(Color32::from_rgb(220, 38, 38));
                             if ui.add_enabled(selected_count > 0, del_btn).clicked() {
                                 let uninst_reg = app.wizard_target_app.as_ref().map(|a| a.registry_path.clone());
@@ -90,11 +98,11 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
                         if app.wizard_traces.is_empty() {
-                            ui.label("Оставшихся следов программы не обнаружено (чистая система).");
+                            ui.label(crate::i18n::t(lang, "Оставшихся следов программы не обнаружено (чистая система).", "No leftover traces detected (clean system)."));
                         } else {
                             if !fs_traces.is_empty() {
                                 let fs_size: u64 = fs_traces.iter().map(|t| t.size_bytes).sum();
-                                ui.strong(format!("🗀 Файловая система ({} элементов, {})", fs_traces.len(), format_size(fs_size)));
+                                ui.strong(format!("🗀 {} ({} {}, {})", crate::i18n::t(lang, "Файловая система", "File system"), fs_traces.len(), crate::i18n::t(lang, "элементов", "items"), format_size_lang(fs_size, lang)));
                                 for t in &mut app.wizard_traces {
                                     if t.trace_type != "registry_key" {
                                         ui.horizontal(|ui| {
@@ -109,7 +117,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                             if !reg_traces.is_empty() {
                                 ui.add_space(6.0);
-                                ui.strong(format!("🗁 Реестр ({} элементов)", reg_traces.len()));
+                                ui.strong(format!("🗁 {} ({} {})", crate::i18n::t(lang, "Реестр", "Registry"), reg_traces.len(), crate::i18n::t(lang, "элементов", "items")));
                                 for t in &mut app.wizard_traces {
                                     if t.trace_type == "registry_key" {
                                         ui.horizontal(|ui| {
@@ -127,12 +135,12 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     // Bottom selection & summary row
                     ui.horizontal(|ui| {
-                        if ui.button("Выбрать все").clicked() {
+                        if ui.button(crate::i18n::t(lang, "Выбрать все", "Select All")).clicked() {
                             for t in &mut app.wizard_traces {
                                 t.selected = true;
                             }
                         }
-                        if ui.button("Снять выбор").clicked() {
+                        if ui.button(crate::i18n::t(lang, "Снять выбор", "Deselect All")).clicked() {
                             for t in &mut app.wizard_traces {
                                 t.selected = false;
                             }
@@ -142,14 +150,22 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             let fs_count = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").count();
                             let reg_count = app.wizard_traces.iter().filter(|t| t.trace_type == "registry_key").count();
                             let fs_size: u64 = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").map(|t| t.size_bytes).sum();
-                            ui.label(RichText::new(format!("{} файлов/папок ({}) и {} элементов реестра", fs_count, format_size(fs_size), reg_count)).small());
+                            ui.label(RichText::new(format!(
+                                "{} {} ({}) {} {} {}",
+                                fs_count,
+                                crate::i18n::t(lang, "файлов/папок", "files/folders"),
+                                format_size_lang(fs_size, lang),
+                                crate::i18n::t(lang, "и", "and"),
+                                reg_count,
+                                crate::i18n::t(lang, "элементов реестра", "registry items")
+                            )).small());
                         });
                     });
                 }
                 WizardPhase::Deleting => {
-                    ui.heading(RichText::new("Удаление элементов...").size(15.0).strong());
+                    ui.heading(RichText::new(crate::i18n::t(lang, "Удаление элементов...", "Deleting items...")).size(15.0).strong());
                     ui.add_space(10.0);
-                    ui.label("Идет очистка выбранных файлов, папок и веток реестра Windows...");
+                    ui.label(crate::i18n::t(lang, "Идет очистка выбранных файлов, папок и веток реестра Windows...", "Purging selected files, folders, and Windows registry keys..."));
                     ui.add_space(12.0);
 
                     let pb = egui::ProgressBar::new(app.wizard_delete_progress)
@@ -161,9 +177,9 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.label(RichText::new(truncate_chars(&app.wizard_scan_current_path, 75)).size(11.0).monospace().color(sub_color));
                 }
                 WizardPhase::Finished => {
-                    ui.heading(RichText::new("✔ Все остатки программы удалены").size(16.0).strong().color(Color32::from_rgb(34, 197, 94)));
+                    ui.heading(RichText::new(crate::i18n::t(lang, "✔ Все остатки программы удалены", "✔ All leftover traces deleted")).size(16.0).strong().color(Color32::from_rgb(34, 197, 94)));
                     ui.add_space(8.0);
-                    ui.label(format!("Программа «{}» успешно удалена с вашего компьютера.", app.wizard_app_title));
+                    ui.label(format!("{} «{}» {}", crate::i18n::t(lang, "Программа", "Program"), app.wizard_app_title, crate::i18n::t(lang, "успешно удалена с вашего компьютера.", "has been successfully removed from your computer.")));
                     if let Some(rep) = &app.wizard_report {
                         ui.add_space(4.0);
                         ui.label(RichText::new(rep).color(Color32::from_rgb(34, 197, 94)));
@@ -189,13 +205,13 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.horizontal(|ui| {
                         if let Some(log_p) = &app.wizard_last_log_path {
                             let link_color = if app.dark_mode { Color32::from_rgb(96, 165, 250) } else { Color32::from_rgb(37, 99, 235) };
-                            if ui.link(RichText::new("Лог удаления").underline().color(link_color)).clicked() {
+                            if ui.link(RichText::new(crate::i18n::t(lang, "Лог удаления", "Removal Log")).underline().color(link_color)).clicked() {
                                 let _ = Command::new("notepad.exe").arg(log_p).spawn();
                             }
                         }
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.button(RichText::new("Закрыть").strong()).clicked() {
+                            if ui.button(RichText::new(crate::i18n::t(lang, "Закрыть", "Close")).strong()).clicked() {
                                 close_wizard = true;
                             }
                         });
@@ -220,7 +236,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         app.wizard_delete_rx = None;
         app.wizard_xml_status = None;
         let total_size: u64 = app.apps.iter().map(|a| a.size_bytes).sum();
-        app.status_msg = format!("Программ: {} | Общий объем: {}", app.apps.len(), format_size(total_size));
+        app.status_msg = format!("{}: {} | {}: {}", crate::i18n::t(lang, "Программ", "Programs"), app.apps.len(), crate::i18n::t(lang, "Общий объем", "Total size"), format_size_lang(total_size, lang));
         if let Some(idx) = app.selected_app_idx {
             if idx >= app.apps.len() {
                 app.selected_app_idx = if !app.apps.is_empty() { Some(0) } else { None };

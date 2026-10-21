@@ -1,6 +1,6 @@
 use eframe::egui::{self, Color32, RichText, Stroke};
 use crate::app::PurgeCraftApp;
-use crate::types::{format_size, jump_to_regedit, open_system_folder};
+use crate::types::{format_size_lang, jump_to_regedit, open_system_folder};
 use crate::cleaner::{
     scan_windows_services, set_service_startup, delete_windows_service,
     ServiceFilter, ServiceStartupType,
@@ -15,6 +15,7 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
+    let lang = app.lang();
     let mut is_open = true;
     let mut do_clean = false;
     let mut do_rescan = false;
@@ -31,7 +32,7 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         .map(|i| i.file_count)
         .sum();
 
-    egui::Window::new("♻ Глубокая очистка системы Windows")
+    egui::Window::new(crate::i18n::t(lang, "♻ Глубокая очистка системы Windows", "♻ Windows Deep System Clean"))
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
@@ -42,7 +43,7 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.set_height(480.0);
 
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("♻ Очистка системного мусора и кэшей").strong());
+                ui.heading(RichText::new(crate::i18n::t(lang, "♻ Очистка системного мусора и кэшей", "♻ System Junk & Cache Cleaner")).strong());
                 if app.system_clean_is_busy {
                     ui.add_space(8.0);
                     ui.spinner();
@@ -50,7 +51,11 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 }
             });
             ui.add_space(4.0);
-            ui.label("Безопасное удаление устаревших загрузок Windows Update, дампов падений WER, миниатюр Проводника и системных временных файлов.");
+            ui.label(crate::i18n::t(
+                lang,
+                "Безопасное удаление устаревших загрузок Windows Update, дампов падений WER, миниатюр Проводника и системных временных файлов.",
+                "Safely remove outdated Windows Update downloads, WER crash dumps, Explorer thumbnails, and temporary system files."
+            ));
             ui.add_space(8.0);
 
             if let Some(msg) = &app.system_clean_msg {
@@ -72,14 +77,21 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .inner_margin(10.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("Выбрано: {} файлов • {}", total_selected_files, format_size(total_selected_bytes))).strong());
+                        let selected_summary = format!(
+                            "{}: {} {} • {}",
+                            crate::i18n::t(lang, "Выбрано", "Selected"),
+                            total_selected_files,
+                            crate::i18n::t(lang, "файлов", "files"),
+                            format_size_lang(total_selected_bytes, lang)
+                        );
+                        ui.label(RichText::new(selected_summary).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new("Снять выбор")).clicked() {
+                            if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "Снять выбор", "Deselect All"))).clicked() {
                                 for item in &mut app.system_clean_items {
                                     item.selected = false;
                                 }
                             }
-                            if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new("Выбрать все")).clicked() {
+                            if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "Выбрать все", "Select All"))).clicked() {
                                 for item in &mut app.system_clean_items {
                                     item.selected = true;
                                 }
@@ -110,7 +122,7 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 ui.checkbox(&mut item.selected, "");
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(&item.name).strong());
+                                        ui.label(RichText::new(item.display_name(lang)).strong());
                                         // Category chip
                                         let chip_bg = if app.dark_mode { Color32::from_rgb(49, 46, 129) } else { Color32::from_rgb(224, 231, 255) };
                                         let chip_text = if app.dark_mode { Color32::from_rgb(199, 210, 254) } else { Color32::from_rgb(67, 56, 202) };
@@ -119,11 +131,11 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                             .rounding(4.0)
                                             .inner_margin(egui::Margin::symmetric(5.0, 2.0))
                                             .show(ui, |ui| {
-                                                ui.label(RichText::new(&item.category).size(11.0).color(chip_text));
+                                                ui.label(RichText::new(item.display_category(lang)).size(11.0).color(chip_text));
                                             });
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            ui.label(RichText::new(format_size(item.size_bytes)).strong().color(
+                                            ui.label(RichText::new(format_size_lang(item.size_bytes, lang)).strong().color(
                                                 if item.size_bytes > 500 * 1024 * 1024 {
                                                     Color32::from_rgb(239, 68, 68)
                                                 } else if item.size_bytes > 0 {
@@ -132,10 +144,10 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                     Color32::GRAY
                                                 }
                                             ));
-                                            ui.label(RichText::new(format!("{} файлов", item.file_count)).size(11.0).color(Color32::GRAY));
+                                            ui.label(RichText::new(format!("{} {}", item.file_count, crate::i18n::t(lang, "файлов", "files"))).size(11.0).color(Color32::GRAY));
                                         });
                                     });
-                                    ui.label(RichText::new(&item.description).size(11.0).color(Color32::GRAY));
+                                    ui.label(RichText::new(item.display_desc(lang)).size(11.0).color(Color32::GRAY));
                                 });
                             });
                         });
@@ -148,16 +160,16 @@ pub fn render_system_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new("🔄 Пересканировать")).clicked() {
+                if ui.add_enabled(!app.system_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan"))).clicked() {
                     do_rescan = true;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Закрыть").clicked() {
+                    if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
 
-                    let clean_label = format!("Очистить выбранное ({})", format_size(total_selected_bytes));
+                    let clean_label = format!("{} ({})", crate::i18n::t(lang, "Очистить выбранное", "Clean Selected"), format_size_lang(total_selected_bytes, lang));
                     let clean_btn = egui::Button::new(RichText::new(clean_label).strong().color(Color32::WHITE))
                         .fill(if total_selected_bytes > 0 && !app.system_clean_is_busy { Color32::from_rgb(220, 38, 38) } else { Color32::from_rgb(100, 116, 139) });
 
@@ -188,6 +200,7 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
+    let lang = app.lang();
     let mut is_open = true;
     let mut do_clean = false;
     let mut do_rescan = false;
@@ -204,7 +217,7 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         .map(|i| i.file_count)
         .sum();
 
-    egui::Window::new("🛠 Очистка кэшей разработчика (Dev Environments)")
+    egui::Window::new(crate::i18n::t(lang, "🛠 Очистка кэшей разработчика (Dev Environments)", "🛠 Developer Environments Cleaner (Dev Caches)"))
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
@@ -215,7 +228,7 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.set_height(490.0);
 
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("🛠 Кэши сред разработки и пакетных менеджеров").strong());
+                ui.heading(RichText::new(crate::i18n::t(lang, "🛠 Кэши сред разработки и пакетных менеджеров", "🛠 Dev Environments & Package Manager Caches")).strong());
                 if app.dev_clean_is_busy {
                     ui.add_space(8.0);
                     ui.spinner();
@@ -223,7 +236,11 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 }
             });
             ui.add_space(4.0);
-            ui.label("Очистка накопленных архивов библиотек и промежуточных сборок Node.js, Python, Rust, Go, .NET, Gradle, Maven и JetBrains.");
+            ui.label(crate::i18n::t(
+                lang,
+                "Очистка накопленных архивов библиотек и промежуточных сборок Node.js, Python, Rust, Go, .NET, Gradle, Maven и JetBrains.",
+                "Clean up accumulated package archives and build artifacts for Node.js, Python, Rust, Go, .NET, Gradle, Maven, and JetBrains."
+            ));
             ui.add_space(8.0);
 
             if let Some(msg) = &app.dev_clean_msg {
@@ -245,14 +262,21 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .inner_margin(10.0)
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("Выбрано: {} файлов • {}", total_selected_files, format_size(total_selected_bytes))).strong());
+                        let selected_summary = format!(
+                            "{}: {} {} • {}",
+                            crate::i18n::t(lang, "Выбрано", "Selected"),
+                            total_selected_files,
+                            crate::i18n::t(lang, "файлов", "files"),
+                            format_size_lang(total_selected_bytes, lang)
+                        );
+                        ui.label(RichText::new(selected_summary).strong());
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new("Снять выбор")).clicked() {
+                            if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "Снять выбор", "Deselect All"))).clicked() {
                                 for item in &mut app.dev_clean_items {
                                     item.selected = false;
                                 }
                             }
-                            if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new("Выбрать все")).clicked() {
+                            if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "Выбрать все", "Select All"))).clicked() {
                                 for item in &mut app.dev_clean_items {
                                     item.selected = true;
                                 }
@@ -283,7 +307,7 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 ui.checkbox(&mut item.selected, "");
                                 ui.vertical(|ui| {
                                     ui.horizontal(|ui| {
-                                        ui.label(RichText::new(&item.name).strong());
+                                        ui.label(RichText::new(item.display_name(lang)).strong());
                                         // Ecosystem badge
                                         let (chip_bg, chip_text) = match item.ecosystem.as_str() {
                                             "Rust" => (Color32::from_rgb(180, 83, 9), Color32::WHITE),
@@ -303,7 +327,7 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                             });
 
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            ui.label(RichText::new(format_size(item.size_bytes)).strong().color(
+                                            ui.label(RichText::new(format_size_lang(item.size_bytes, lang)).strong().color(
                                                 if item.size_bytes > 1024 * 1024 * 1024 {
                                                     Color32::from_rgb(239, 68, 68)
                                                 } else if item.size_bytes > 0 {
@@ -312,10 +336,10 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                     Color32::GRAY
                                                 }
                                             ));
-                                            ui.label(RichText::new(format!("{} файлов", item.file_count)).size(11.0).color(Color32::GRAY));
+                                            ui.label(RichText::new(format!("{} {}", item.file_count, crate::i18n::t(lang, "файлов", "files"))).size(11.0).color(Color32::GRAY));
                                         });
                                     });
-                                    ui.label(RichText::new(&item.description).size(11.0).color(Color32::GRAY));
+                                    ui.label(RichText::new(item.display_desc(lang)).size(11.0).color(Color32::GRAY));
                                 });
                             });
                         });
@@ -328,16 +352,16 @@ pub fn render_dev_clean_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new("🔄 Пересканировать")).clicked() {
+                if ui.add_enabled(!app.dev_clean_is_busy, egui::Button::new(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan"))).clicked() {
                     do_rescan = true;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Закрыть").clicked() {
+                    if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
 
-                    let clean_label = format!("Очистить выбранные кэши ({})", format_size(total_selected_bytes));
+                    let clean_label = format!("{} ({})", crate::i18n::t(lang, "Очистить выбранные кэши", "Clean Selected Caches"), format_size_lang(total_selected_bytes, lang));
                     let clean_btn = egui::Button::new(RichText::new(clean_label).strong().color(Color32::WHITE))
                         .fill(if total_selected_bytes > 0 && !app.dev_clean_is_busy { Color32::from_rgb(16, 185, 129) } else { Color32::from_rgb(100, 116, 139) });
 
@@ -368,6 +392,7 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
+    let lang = app.lang();
     let mut is_open = true;
     let mut do_rescan = false;
     let mut do_close = false;
@@ -377,7 +402,7 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let zombie_count = app.services_items.iter().filter(|s| s.is_zombie).count();
     let third_party_count = app.services_items.iter().filter(|s| s.is_third_party && !s.is_zombie).count();
 
-    egui::Window::new("⚙ Менеджер служб Windows и Охотник за зомби")
+    egui::Window::new(crate::i18n::t(lang, "⚙ Менеджер служб Windows и Охотник за зомби", "⚙ Windows Services Manager & Zombie Hunter"))
         .open(&mut is_open)
         .collapsible(false)
         .resizable(true)
@@ -388,10 +413,14 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.set_height(540.0);
 
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("⚙ Службы Windows и Детектор «зомби-сервисов»").strong());
+                ui.heading(RichText::new(crate::i18n::t(lang, "⚙ Службы Windows и Детектор «зомби-сервисов»", "⚙ Windows Services & Zombie Service Detector")).strong());
             });
             ui.add_space(4.0);
-            ui.label("Обнаружение служб, чьи исполняемые файлы были удалены («зомби»), а также управление запуском сторонних служб Windows.");
+            ui.label(crate::i18n::t(
+                lang,
+                "Обнаружение служб, чьи исполняемые файлы были удалены («зомби»), а также управление запуском сторонних служб Windows.",
+                "Detect services whose executable binaries were deleted ('zombies') and manage startup for third-party Windows services."
+            ));
             ui.add_space(8.0);
 
             if let Some(msg) = &app.services_msg {
@@ -407,20 +436,20 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             // Filter bar and search
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut app.services_filter, ServiceFilter::All, "Все службы");
+                ui.selectable_value(&mut app.services_filter, ServiceFilter::All, crate::i18n::t(lang, "Все службы", "All Services"));
 
-                let zombie_chip = format!("🧟 Службы-зомби ({})", zombie_count);
+                let zombie_chip = format!("🧟 {} ({})", crate::i18n::t(lang, "Службы-зомби", "Zombie Services"), zombie_count);
                 let z_btn = ui.selectable_value(&mut app.services_filter, ServiceFilter::Zombies, zombie_chip);
                 if zombie_count > 0 {
-                    z_btn.on_hover_text("Службы, исполняемый файл которых отсутствует на диске!");
+                    z_btn.on_hover_text(crate::i18n::t(lang, "Службы, исполняемый файл которых отсутствует на диске!", "Services whose executable file does not exist on disk!"));
                 }
 
-                let third_chip = format!("Сторонние ({})", third_party_count);
+                let third_chip = format!("{} ({})", crate::i18n::t(lang, "Сторонние", "3rd Party"), third_party_count);
                 ui.selectable_value(&mut app.services_filter, ServiceFilter::ThirdParty, third_chip);
-                ui.selectable_value(&mut app.services_filter, ServiceFilter::Drivers, "Драйверы ядра");
+                ui.selectable_value(&mut app.services_filter, ServiceFilter::Drivers, crate::i18n::t(lang, "Драйверы ядра", "Kernel Drivers"));
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.add(egui::TextEdit::singleline(&mut app.services_search).hint_text("🔍 Поиск по имени или пути..."));
+                    ui.add(egui::TextEdit::singleline(&mut app.services_search).hint_text(crate::i18n::t(lang, "🔍 Поиск по имени или пути...", "🔍 Search by name or path...")));
                 });
             });
 
@@ -460,7 +489,7 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 if filtered.is_empty() {
                     ui.add_space(20.0);
                     ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("Службы по заданному фильтру не найдены").color(Color32::GRAY));
+                        ui.label(RichText::new(crate::i18n::t(lang, "Службы по заданному фильтру не найдены", "No services match current filter")).color(Color32::GRAY));
                     });
                 }
 
@@ -496,7 +525,7 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         .rounding(4.0)
                                         .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                         .show(ui, |ui| {
-                                            ui.label(RichText::new("🧟 ЗОМБИ").color(Color32::WHITE).strong().size(11.0));
+                                            ui.label(RichText::new(crate::i18n::t(lang, "🧟 ЗОМБИ", "🧟 ZOMBIE")).color(Color32::WHITE).strong().size(11.0));
                                         });
                                 } else if s.is_third_party {
                                     egui::Frame::none()
@@ -524,25 +553,25 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                             // Action buttons
                                             if s.is_zombie {
-                                                if ui.button(RichText::new("🗑 Удалить зомби").color(Color32::WHITE)).clicked() {
+                                                if ui.button(RichText::new(crate::i18n::t(lang, "🗑 Удалить зомби", "🗑 Delete Zombie")).color(Color32::WHITE)).clicked() {
                                                     service_to_del = Some(s.name.clone());
                                                 }
                                             } else {
                                                 match s.startup_type {
                                                     ServiceStartupType::Disabled => {
-                                                        if ui.button("Включить (Авто)").clicked() {
+                                                        if ui.button(crate::i18n::t(lang, "Включить (Авто)", "Enable (Auto)")).clicked() {
                                                             service_to_toggle = Some((s.name.clone(), "auto".to_string()));
                                                         }
                                                     }
                                                     _ => {
-                                                        if ui.button("Отключить").clicked() {
+                                                        if ui.button(crate::i18n::t(lang, "Отключить", "Disable")).clicked() {
                                                             service_to_toggle = Some((s.name.clone(), "disabled".to_string()));
                                                         }
                                                     }
                                                 }
                                             }
 
-                                            if ui.small_button("Реестр").clicked() {
+                                            if ui.small_button(crate::i18n::t(lang, "Реестр", "Registry")).clicked() {
                                                 jump_to_regedit(&format!(r"HKLM\SYSTEM\CurrentControlSet\Services\{}", s.name));
                                             }
 
@@ -552,7 +581,7 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                 ServiceStartupType::Disabled => Color32::from_rgb(239, 68, 68),
                                                 _ => Color32::GRAY,
                                             };
-                                            ui.label(RichText::new(s.startup_type.label()).size(11.0).color(st_color).strong());
+                                            ui.label(RichText::new(s.startup_type.label_lang(lang)).size(11.0).color(st_color).strong());
                                         });
                                     });
 
@@ -560,9 +589,9 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                     if let Some(bin) = &s.binary_path {
                                         ui.horizontal(|ui| {
                                             let path_col = if s.is_zombie { Color32::from_rgb(239, 68, 68) } else { Color32::GRAY };
-                                            let icon = if s.is_zombie { "❌ Файл не найден: " } else { "📁 " };
+                                            let icon = if s.is_zombie { crate::i18n::t(lang, "❌ Файл не найден: ", "❌ File not found: ") } else { "📁 " };
                                             ui.label(RichText::new(format!("{}{}", icon, bin)).size(11.0).color(path_col));
-                                            if !s.is_zombie && ui.small_button("Папка").clicked() {
+                                            if !s.is_zombie && ui.small_button(crate::i18n::t(lang, "Папка", "Folder")).clicked() {
                                                 open_system_folder(bin, app.settings.use_total_commander);
                                             }
                                         });
@@ -579,12 +608,12 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                if ui.button("🔄 Обновить службы").clicked() {
+                if ui.button(crate::i18n::t(lang, "🔄 Обновить службы", "🔄 Refresh Services")).clicked() {
                     do_rescan = true;
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Закрыть").clicked() {
+                    if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
                 });
@@ -594,11 +623,17 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     if let Some((name, mode)) = service_to_toggle {
         match set_service_startup(&name, &mode) {
             Ok(_) => {
-                app.services_msg = Some(format!("Режим запуска службы '{}' изменен на '{}'", name, mode));
+                app.services_msg = Some(format!(
+                    "{} '{}' {} '{}'",
+                    crate::i18n::t(lang, "Режим запуска службы", "Startup mode for service"),
+                    name,
+                    crate::i18n::t(lang, "изменен на", "changed to"),
+                    mode
+                ));
                 app.services_items = scan_windows_services();
             }
             Err(e) => {
-                app.services_msg = Some(format!("Ошибка: {}", e));
+                app.services_msg = Some(format!("{}: {}", crate::i18n::t(lang, "Ошибка", "Error"), e));
             }
         }
     }
@@ -606,18 +641,23 @@ pub fn render_services_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     if let Some(name) = service_to_del {
         match delete_windows_service(&name) {
             Ok(_) => {
-                app.services_msg = Some(format!("Зомби-служба '{}' успешно удалена из системы", name));
+                app.services_msg = Some(format!(
+                    "{} '{}' {}",
+                    crate::i18n::t(lang, "Зомби-служба", "Zombie service"),
+                    name,
+                    crate::i18n::t(lang, "успешно удалена из системы", "successfully removed from system")
+                ));
                 app.services_items = scan_windows_services();
             }
             Err(e) => {
-                app.services_msg = Some(format!("Ошибка удаления службы: {}", e));
+                app.services_msg = Some(format!("{}: {}", crate::i18n::t(lang, "Ошибка удаления службы", "Failed to delete service"), e));
             }
         }
     }
 
     if do_rescan {
         app.services_items = scan_windows_services();
-        app.services_msg = Some("Список служб обновлен".to_string());
+        app.services_msg = Some(crate::i18n::t(lang, "Список служб обновлен", "Services list updated").to_string());
     }
     if do_close || !is_open {
         app.services_modal_open = false;
