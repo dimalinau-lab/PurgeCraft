@@ -147,16 +147,24 @@ pub fn spawn_size_calculator(apps: &[InstalledApp], tx: std::sync::mpsc::Sender<
     });
 }
 
-pub fn format_size(bytes: u64) -> String {
+pub fn format_size_lang(bytes: u64, lang: crate::i18n::Language) -> String {
     if bytes == 0 {
         return "—".to_string();
     }
     let mb = bytes as f64 / (1024.0 * 1024.0);
+    let (mb_unit, gb_unit) = match lang {
+        crate::i18n::Language::Russian => ("МБ", "ГБ"),
+        crate::i18n::Language::English => ("MB", "GB"),
+    };
     if mb < 1000.0 {
-        format!("{:.1} МБ", mb)
+        format!("{:.1} {}", mb, mb_unit)
     } else {
-        format!("{:.2} ГБ", mb / 1024.0)
+        format!("{:.2} {}", mb / 1024.0, gb_unit)
     }
+}
+
+pub fn format_size(bytes: u64) -> String {
+    format_size_lang(bytes, crate::i18n::Language::Russian)
 }
 
 pub fn truncate_chars(s: &str, max_chars: usize) -> String {

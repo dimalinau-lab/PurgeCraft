@@ -3,7 +3,7 @@ use egui_extras::{TableBuilder, Column};
 use crate::app::PurgeCraftApp;
 use crate::icons;
 use crate::scanner::{self, InstalledApp, save_known_apps};
-use crate::types::{AppCategory, SortColumn, SortOrder, format_size, truncate_chars, jump_to_regedit, open_system_folder, UninstallerViewMode};
+use crate::types::{AppCategory, SortColumn, SortOrder, format_size_lang, truncate_chars, jump_to_regedit, open_system_folder, UninstallerViewMode};
 use crate::ui::render_sort_header;
 
 pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
@@ -146,11 +146,13 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 let batch_size: u64 = selected_apps_vec.iter().map(|a| a.size_bytes).sum();
 
                 let batch_heading_color = if app.dark_mode { heading_color } else { Color32::from_rgb(2, 132, 199) };
-                ui.heading(RichText::new("📦 ПАКЕТНЫЙ РЕЖИМ").size(15.0).strong().color(batch_heading_color));
+                ui.heading(RichText::new(crate::i18n::t(lang, "📦 ПАКЕТНЫЙ РЕЖИМ", "📦 BATCH MODE")).size(15.0).strong().color(batch_heading_color));
                 ui.add_space(8.0);
 
-                ui.label(RichText::new(format!("Выбрано программ: {}", batch_count)).strong().color(heading_color));
-                ui.label(RichText::new(format!("Общий объем: {}", format_size(batch_size))).color(meta_label_color));
+                let batch_count_text = format!("{}: {}", crate::i18n::t(lang, "Выбрано программ", "Programs selected"), batch_count);
+                ui.label(RichText::new(batch_count_text).strong().color(heading_color));
+                let batch_size_text = format!("{}: {}", crate::i18n::t(lang, "Общий объем", "Total size"), format_size_lang(batch_size, lang));
+                ui.label(RichText::new(batch_size_text).color(meta_label_color));
 
                 ui.add_space(14.0);
                 ui.separator();
@@ -162,8 +164,9 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 } else {
                     (Color32::from_rgb(37, 99, 235), Stroke::NONE)
                 };
+                let batch_uninst_title = format!("🗑 {} ({})", crate::i18n::t(lang, "Пакетное удаление", "Batch Uninstall"), batch_count);
                 let batch_uninst_btn = egui::Button::new(
-                    RichText::new(format!("🗑 Пакетное удаление ({})", batch_count)).size(14.0).strong().color(Color32::WHITE)
+                    RichText::new(batch_uninst_title).size(14.0).strong().color(Color32::WHITE)
                 )
                 .fill(batch_btn_fill)
                 .stroke(batch_btn_stroke)
@@ -176,8 +179,9 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 ui.add_space(6.0);
 
                 // Batch Force Removal Button
+                let batch_force_title = format!("⚠ {} ({})", crate::i18n::t(lang, "Пакетная зачистка", "Batch Force Removal"), batch_count);
                 let batch_force_btn = egui::Button::new(
-                    RichText::new(format!("⚠ Пакетная зачистка ({})", batch_count))
+                    RichText::new(batch_force_title)
                         .size(13.0)
                         .strong()
                         .color(danger_text)
@@ -191,14 +195,14 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 }
 
                 ui.add_space(10.0);
-                if ui.button("✕ Снять выбор со всех").clicked() {
+                if ui.button(crate::i18n::t(lang, "✕ Снять выбор со всех", "✕ Deselect All")).clicked() {
                     app.batch_selected.clear();
                 }
 
                 ui.add_space(14.0);
                 ui.separator();
                 ui.add_space(8.0);
-                ui.label(RichText::new("Список выбранных:").small().strong().color(meta_label_color));
+                ui.label(RichText::new(crate::i18n::t(lang, "Список выбранных:", "Selected list:")).small().strong().color(meta_label_color));
 
                 egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                     for a in &selected_apps_vec {
@@ -260,41 +264,43 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
 
                 // Metadata details
                 egui::Grid::new("app_meta_details").spacing([8.0, 4.0]).show(ui, |ui| {
-                    ui.label(RichText::new("Тип:").color(meta_label_color));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Тип:", "Type:")).color(meta_label_color));
                     let type_str = if a_item.source_badge == "[Portable]" {
-                        "Portable (Переносная)"
+                        crate::i18n::t(lang, "Portable (Переносная)", "Portable")
                     } else if a_item.is_uwp {
-                        "Магазин Windows"
+                        crate::i18n::t(lang, "Магазин Windows", "Windows Store")
                     } else if a_item.is_64bit {
-                        "64-бит Win32"
+                        crate::i18n::t(lang, "64-бит Win32", "64-bit Win32")
                     } else {
-                        "32-бит Win32"
+                        crate::i18n::t(lang, "32-бит Win32", "32-bit Win32")
                     };
                     ui.label(RichText::new(type_str).strong().color(heading_color));
                     ui.end_row();
 
-                    ui.label(RichText::new("Версия:").color(meta_label_color));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Версия:", "Version:")).color(meta_label_color));
                     ui.label(RichText::new(if a_item.version.is_empty() { "1.0" } else { &a_item.version }).strong());
                     ui.end_row();
 
-                    ui.label(RichText::new("Размер:").color(meta_label_color));
-                    ui.label(RichText::new(format_size(a_item.size_bytes)).strong());
+                    ui.label(RichText::new(crate::i18n::t(lang, "Размер:", "Size:")).color(meta_label_color));
+                    ui.label(RichText::new(format_size_lang(a_item.size_bytes, lang)).strong());
                     ui.end_row();
 
-                    ui.label(RichText::new("Установка:").color(meta_label_color));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Установка:", "Installed:")).color(meta_label_color));
                     ui.label(RichText::new(if a_item.install_date.is_empty() { "—" } else { &a_item.install_date }).strong());
                     ui.end_row();
 
-                    ui.label(RichText::new("Издатель:").color(meta_label_color));
-                    ui.label(truncate_chars(if a_item.publisher.is_empty() { "Не указан" } else { &a_item.publisher }, 20));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Издатель:", "Publisher:")).color(meta_label_color));
+                    let unknown_pub = crate::i18n::t(lang, "Не указан", "Unknown");
+                    ui.label(truncate_chars(if a_item.publisher.is_empty() { unknown_pub } else { &a_item.publisher }, 20));
                     ui.end_row();
 
-                    ui.label(RichText::new("Папка:").color(meta_label_color));
+                    ui.label(RichText::new(crate::i18n::t(lang, "Папка:", "Location:")).color(meta_label_color));
                     if !loc.is_empty() {
                         let display_path = truncate_chars(&loc, 22);
                         let link_color = if app.dark_mode { Color32::from_rgb(96, 165, 250) } else { Color32::from_rgb(2, 132, 199) };
+                        let open_folder_tip = format!("{}:\n{}", crate::i18n::t(lang, "Нажмите, чтобы открыть папку в Проводнике", "Click to open folder in File Explorer"), loc);
                         let link_resp = ui.link(RichText::new(display_path).color(link_color).underline())
-                            .on_hover_text(format!("Нажмите, чтобы открыть папку в Проводнике:\n{}", loc));
+                            .on_hover_text(open_folder_tip);
                         if link_resp.clicked() {
                             open_system_folder(&loc, app.settings.use_total_commander);
                         }
@@ -305,9 +311,11 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
 
                     let is_traced = app.traced_apps.iter().any(|t| t.name.eq_ignore_ascii_case(&a_item.name) || t.id == a_item.id);
                     if is_traced {
-                        ui.label(RichText::new("Монитор:").color(meta_label_color));
-                        ui.label(RichText::new("⚡ Отслежено").color(Color32::from_rgb(234, 179, 8)).strong())
-                            .on_hover_text("Все компоненты программы зафиксированы при установке (100% чистый снос)");
+                        ui.label(RichText::new(crate::i18n::t(lang, "Монитор:", "Tracker:")).color(meta_label_color));
+                        let trace_label = crate::i18n::t(lang, "⚡ Отслежено", "⚡ Traced");
+                        let trace_tip = crate::i18n::t(lang, "Все компоненты программы зафиксированы при установке (100% чистый снос)", "All components logged during installation (100% clean uninstall)");
+                        ui.label(RichText::new(trace_label).color(Color32::from_rgb(234, 179, 8)).strong())
+                            .on_hover_text(trace_tip);
                         ui.end_row();
                     }
                 });
@@ -703,7 +711,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
                                 });
                                 let sz_color = if is_selected { Color32::WHITE } else if app.dark_mode { Color32::from_rgb(212, 212, 216) } else { Color32::from_rgb(51, 65, 85) };
-                                ui.label(RichText::new(format_size(item_app.size_bytes)).color(sz_color));
+                                ui.label(RichText::new(format_size_lang(item_app.size_bytes, lang)).color(sz_color));
                             });
 
                             // Column 3: Date - CLICKABLE ANYWHERE + CONTEXT MENU
