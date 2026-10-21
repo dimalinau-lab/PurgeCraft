@@ -1148,37 +1148,24 @@ pub fn add_startup_item(name: &str, path: &str, args: &str, hive_hklm: bool) -> 
 }
 
 pub fn pick_file_dialog(filter_desc: &str, filter_ext: &str) -> Option<String> {
-    let script = format!(
-        "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.OpenFileDialog; $f.Filter = '{} ({})|{}|All files (*.*)|*.*'; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {{ $f.FileName }}",
-        filter_desc, filter_ext, filter_ext
-    );
-    let mut cmd = Command::new("powershell");
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let out = cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]).output().ok()?;
-    if out.status.success() {
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !path.is_empty() && Path::new(&path).exists() {
-            return Some(path);
-        }
+    let mut dialog = rfd::FileDialog::new();
+    let exts: Vec<&str> = filter_ext
+        .split(';')
+        .map(|s| s.trim().trim_start_matches('*').trim_start_matches('.'))
+        .filter(|s| !s.is_empty())
+        .collect();
+    if !exts.is_empty() {
+        dialog = dialog.add_filter(filter_desc, &exts);
     }
-    None
+    let file = dialog.pick_file()?;
+    Some(file.to_string_lossy().to_string())
 }
 
 pub fn pick_folder_dialog() -> Option<String> {
-    let script = "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $f.SelectedPath }";
-    let mut cmd = Command::new("powershell");
-    #[cfg(windows)]
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let out = cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]).output().ok()?;
-    if out.status.success() {
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !path.is_empty() && Path::new(&path).exists() {
-            return Some(path);
-        }
-    }
-    None
+    let folder = rfd::FileDialog::new().pick_folder()?;
+    Some(folder.to_string_lossy().to_string())
 }
+
 
 pub fn get_app_tokens(app: &InstalledApp) -> Vec<String> {
     let mut tokens = Vec::new();
@@ -1616,15 +1603,22 @@ pub fn delete_dir_contents_safe(dir: &Path, deleted_files: &mut usize, deleted_b
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if p.is_file() {
-                let sz = entry.metadata().map(|m| m.len()).unwrap_or(0);
-                if std::fs::remove_file(&p).is_ok() {
-                    *deleted_files += 1;
-                    *deleted_bytes += sz;
+            if let Ok(meta) = entry.metadata() {
+                let mut perms = meta.permissions();
+                if perms.readonly() {
+                    perms.set_readonly(false);
+                    let _ = std::fs::set_permissions(&p, perms);
                 }
-            } else if p.is_dir() {
-                delete_dir_contents_safe(&p, deleted_files, deleted_bytes);
-                let _ = std::fs::remove_dir(&p);
+                if meta.is_file() {
+                    let sz = meta.len();
+                    if std::fs::remove_file(&p).is_ok() {
+                        *deleted_files += 1;
+                        *deleted_bytes += sz;
+                    }
+                } else if meta.is_dir() {
+                    delete_dir_contents_safe(&p, deleted_files, deleted_bytes);
+                    let _ = std::fs::remove_dir(&p);
+                }
             }
         }
     }
@@ -2220,6 +2214,166 @@ pub fn scan_winget_packages() -> Vec<WingetAppItem> {
     Vec::new()
 }
 
+pub fn cleanup_dead_winget_registry(package_id: &str) -> bool {
+    let hives = [
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM", KEY_WOW64_64KEY),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", "HKLM", KEY_WOW64_32KEY),
+        (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", "HKCU", 0),
+    ];
+
+    let clean_target = package_id.to_lowercase();
+    let clean_target_no_dots = clean_target.replace('.', "");
+    let parts: Vec<&str> = package_id.split('.').collect();
+    let last_part = parts.last().copied().unwrap_or(package_id).to_lowercase();
+
+    let mut deleted_any = false;
+
+    for (root_hive, sub_path, hive_prefix, flags) in hives {
+        let root = RegKey::predef(root_hive);
+        if let Ok(uninstall_key) = root.open_subkey_with_flags(sub_path, KEY_READ | flags) {
+            let subkeys: Vec<String> = uninstall_key.enum_keys().filter_map(|k| k.ok()).collect();
+            for subkey_name in subkeys {
+                let mut is_match = subkey_name.eq_ignore_ascii_case(package_id);
+
+                if !is_match {
+                    if let Ok(app_key) = uninstall_key.open_subkey_with_flags(&subkey_name, KEY_READ | flags) {
+                        let disp = get_string_value(&app_key, "DisplayName").to_lowercase();
+                        let disp_compact: String = disp.chars().filter(|c| c.is_alphanumeric()).collect();
+                        if !disp.is_empty() {
+                            if disp == clean_target
+                                || disp_compact == clean_target_no_dots
+                                || disp_compact == last_part
+                                || disp.contains(&last_part)
+                                || (!last_part.is_empty() && last_part.contains(&disp_compact))
+                            {
+                                is_match = true;
+                            }
+                        }
+                    }
+                }
+
+                if is_match {
+                    // 1. Попытка стандартного удаления через winreg
+                    if let Ok(write_key) = root.open_subkey_with_flags(sub_path, KEY_READ | KEY_WRITE | flags) {
+                        if write_key.delete_subkey_all(&subkey_name).is_ok() {
+                            deleted_any = true;
+                            continue;
+                        }
+                    }
+
+                    // 2. Попытка через reg delete
+                    let full_reg_path = format!(r"{}\{}\{}", hive_prefix, sub_path, subkey_name);
+                    let mut reg_cmd = Command::new("reg");
+                    #[cfg(windows)]
+                    reg_cmd.creation_flags(CREATE_NO_WINDOW);
+                    let ok = reg_cmd.args(["delete", &full_reg_path, "/f"]).output().map(|o| o.status.success()).unwrap_or(false);
+                    if ok {
+                        deleted_any = true;
+                        continue;
+                    }
+
+                    // 3. Повышенное удаление через UAC ShellExecuteExW
+                    let elev_cmd = format!(r#"reg delete "{}" /f"#, full_reg_path);
+                    if crate::cleaner::run_elevated_cmd(&elev_cmd).is_ok() {
+                        deleted_any = true;
+                    }
+                }
+            }
+        }
+    }
+
+    deleted_any
+}
+
+#[cfg(windows)]
+pub fn is_any_process_running_hint(hint: &str) -> bool {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use win32_api::*;
+
+    let hint_clean = hint.to_lowercase();
+    if hint_clean.len() < 3 {
+        return false;
+    }
+
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return false;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                let end_idx = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                let exe_name = OsString::from_wide(&entry.szExeFile[..end_idx]).to_string_lossy().to_string().to_lowercase();
+                if exe_name.contains(&hint_clean) || hint_clean.contains(&exe_name.trim_end_matches(".exe")) {
+                    CloseHandle(snap);
+                    return true;
+                }
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    false
+}
+#[cfg(not(windows))]
+pub fn is_any_process_running_hint(_hint: &str) -> bool {
+    false
+}
+
+#[cfg(windows)]
+pub fn kill_processes_by_hint(hint: &str) -> bool {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use win32_api::*;
+
+    let hint_clean = hint.to_lowercase();
+    if hint_clean.len() < 3 {
+        return false;
+    }
+
+    let mut killed_any = false;
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return false;
+        }
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if Process32FirstW(snap, &mut entry) != 0 {
+            loop {
+                let end_idx = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                let exe_name = OsString::from_wide(&entry.szExeFile[..end_idx]).to_string_lossy().to_string().to_lowercase();
+                if exe_name.contains(&hint_clean) || hint_clean.contains(&exe_name.trim_end_matches(".exe")) {
+                    let pid = entry.th32ProcessID;
+                    if pid != 0 && pid != std::process::id() {
+                        let h_proc = OpenProcess(PROCESS_TERMINATE, 0, pid);
+                        if !h_proc.is_null() && h_proc != INVALID_HANDLE_VALUE {
+                            if TerminateProcess(h_proc, 1) != 0 {
+                                killed_any = true;
+                            }
+                            CloseHandle(h_proc);
+                        }
+                    }
+                }
+                if Process32NextW(snap, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snap);
+    }
+    killed_any
+}
+#[cfg(not(windows))]
+pub fn kill_processes_by_hint(_hint: &str) -> bool {
+    false
+}
+
 pub fn uninstall_winget_package(package_id: &str) -> Result<String, String> {
     let mut cmd = Command::new("winget");
     #[cfg(windows)]
@@ -2234,19 +2388,44 @@ pub fn uninstall_winget_package(package_id: &str) -> Result<String, String> {
     .output()
     .map_err(|e| e.to_string())?;
 
+    let stdout_decoded = crate::cleaner::decode_console_output(&output.stdout);
+    let stderr_decoded = crate::cleaner::decode_console_output(&output.stderr);
+    let combined = if stderr_decoded.is_empty() {
+        stdout_decoded
+    } else {
+        format!("{}\n{}", stdout_decoded, stderr_decoded)
+    };
+
     if output.status.success() {
         Ok(format!("Пакет {} успешно удален через Winget.", package_id))
     } else {
-        let err = String::from_utf8_lossy(&output.stderr);
-        Err(if err.trim().is_empty() {
-            String::from_utf8_lossy(&output.stdout).to_string()
+        if combined.contains("0x800401f5") || combined.contains("Application not found") || combined.contains("не найдено") {
+            if cleanup_dead_winget_registry(package_id) {
+                return Ok(format!(
+                    "Файлы деинсталлятора не найдены на диске (0x800401f5). Мертвая запись «{}» успешно удалена из реестра Windows.",
+                    package_id
+                ));
+            }
+        }
+
+        Err(if combined.trim().is_empty() {
+            format!("Команда winget uninstall завершилась с кодом {}", output.status.code().unwrap_or(-1))
         } else {
-            err.to_string()
+            combined
         })
     }
 }
 
 pub fn upgrade_winget_package(package_id: &str) -> Result<String, String> {
+    let parts: Vec<&str> = package_id.split('.').collect();
+    let proc_hint = parts.last().copied().unwrap_or(package_id).to_lowercase();
+
+    // Перед запуском обновления завершаем активный процесс приложения, если оно запущено (например, в трее)
+    if is_any_process_running_hint(&proc_hint) {
+        kill_processes_by_hint(&proc_hint);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+    }
+
     let mut cmd = Command::new("winget");
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -2262,19 +2441,30 @@ pub fn upgrade_winget_package(package_id: &str) -> Result<String, String> {
     .output()
     .map_err(|e| e.to_string())?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout_decoded = crate::cleaner::decode_console_output(&output.stdout);
+    let stderr_decoded = crate::cleaner::decode_console_output(&output.stderr);
 
     if output.status.success() {
         Ok(format!("Пакет {} успешно обновлен через Winget.", package_id))
     } else {
-        let err = if !stderr.trim().is_empty() {
-            stderr.to_string()
-        } else if !stdout.trim().is_empty() {
-            stdout.to_string()
+        let mut err = if !stderr_decoded.is_empty() {
+            stderr_decoded
+        } else if !stdout_decoded.is_empty() {
+            stdout_decoded
         } else {
             format!("Команда winget завершилась с кодом {}", output.status.code().unwrap_or(-1))
         };
+
+        let exit_code = output.status.code().unwrap_or(-1);
+        if exit_code == 1 || err.contains("код выхода: 1") || err.contains("exit code: 1") {
+            if is_any_process_running_hint(&proc_hint) {
+                err = format!(
+                    "Сбой обновления (код выхода: 1): Приложение «{}» все еще активно в системном трее или фоне. Закройте приложение перед обновлением.",
+                    proc_hint
+                );
+            }
+        }
+
         Err(err)
     }
 }

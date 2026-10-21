@@ -1,0 +1,1190 @@
+use std::path::{Path, PathBuf};
+use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+use winreg::enums::*;
+use winreg::RegKey;
+
+use crate::scanner::{delete_dir_contents_safe, CREATE_NO_WINDOW};
+
+/// Fast bounded directory traversal: skips symlinks and caps recursion at max_depth
+pub fn count_dir_fast(dir: &Path, depth: usize) -> (usize, u64) {
+    if depth > 6 {
+        return (0, 0);
+    }
+    let mut count = 0;
+    let mut total_size = 0;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_symlink() {
+                    continue;
+                }
+                if meta.is_dir() {
+                    let (sub_count, sub_size) = count_dir_fast(&entry.path(), depth + 1);
+                    count += sub_count;
+                    total_size += sub_size;
+                } else {
+                    count += 1;
+                    total_size += meta.len();
+                }
+            }
+        }
+    }
+    (count, total_size)
+}
+
+// ============================================================================
+// 1. System Deep Clean (Windows Update, Dumps, Thumbcache, Temp)
+// ============================================================================
+
+#[derive(Clone, Debug)]
+pub struct SystemCleanItem {
+    pub id: String,
+    pub name: String,
+    pub category: String,
+    pub description: String,
+    pub paths: Vec<PathBuf>,
+    pub file_count: usize,
+    pub size_bytes: u64,
+    pub selected: bool,
+}
+
+pub fn scan_system_clean_items() -> Vec<SystemCleanItem> {
+    let mut items = Vec::new();
+
+    let local_appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let program_data = std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".to_string());
+    let temp_dir = std::env::temp_dir();
+
+    // 1. Windows Update SoftwareDistribution Download cache
+    let sw_dist = PathBuf::from(&system_root).join("SoftwareDistribution").join("Download");
+    if sw_dist.exists() && sw_dist.is_dir() {
+        let (count, size) = count_dir_fast(&sw_dist, 0);
+        items.push(SystemCleanItem {
+            id: "win_update".to_string(),
+            name: "Кэш обновлений Windows Update".to_string(),
+            category: "Система".to_string(),
+            description: "Временные установочные файлы скачанных обновлений Windows. Безопасны к удалению после установки.".to_string(),
+            paths: vec![sw_dist],
+            file_count: count,
+            size_bytes: size,
+            selected: true,
+        });
+    }
+
+    // 2. Windows Crash Dumps & WER
+    let mut dump_paths = Vec::new();
+    let crash_dumps = PathBuf::from(&local_appdata).join("CrashDumps");
+    if crash_dumps.exists() { dump_paths.push(crash_dumps); }
+
+    let minidumps = PathBuf::from(&system_root).join("Minidump");
+    if minidumps.exists() { dump_paths.push(minidumps); }
+
+    let wer_archive = PathBuf::from(&program_data).join("Microsoft").join("Windows").join("WER").join("ReportArchive");
+    if wer_archive.exists() { dump_paths.push(wer_archive); }
+
+    let wer_queue = PathBuf::from(&program_data).join("Microsoft").join("Windows").join("WER").join("ReportQueue");
+    if wer_queue.exists() { dump_paths.push(wer_queue); }
+
+    let mut dump_count = 0;
+    let mut dump_size = 0;
+    for p in &dump_paths {
+        let (c, s) = count_dir_fast(p, 0);
+        dump_count += c;
+        dump_size += s;
+    }
+    if !dump_paths.is_empty() {
+        items.push(SystemCleanItem {
+            id: "crash_dumps".to_string(),
+            name: "Аварийные дампы падений (WER & Minidumps)".to_string(),
+            category: "Диагностика".to_string(),
+            description: "Дампы оперативной памяти и отчеты об ошибках приложений, созданные при сбоях.".to_string(),
+            paths: dump_paths,
+            file_count: dump_count,
+            size_bytes: dump_size,
+            selected: true,
+        });
+    }
+
+    // 3. Thumbnail & Icon Explorer Cache
+    let explorer_cache = PathBuf::from(&local_appdata).join("Microsoft").join("Windows").join("Explorer");
+    if explorer_cache.exists() && explorer_cache.is_dir() {
+        let mut thumb_count = 0;
+        let mut thumb_size = 0;
+        let mut thumb_paths = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&explorer_cache) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_lowercase();
+                if name.starts_with("thumbcache_") || name.starts_with("iconcache_") {
+                    let sz = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    thumb_count += 1;
+                    thumb_size += sz;
+                    thumb_paths.push(entry.path());
+                }
+            }
+        }
+        if thumb_count > 0 {
+            items.push(SystemCleanItem {
+                id: "thumb_cache".to_string(),
+                name: "Кэш миниатюр Проводника (Thumbcache)".to_string(),
+                category: "Интерфейс".to_string(),
+                description: "Базы данных эскизов изображений и иконок Проводника Windows. Проводник пересоздает их автоматически.".to_string(),
+                paths: thumb_paths,
+                file_count: thumb_count,
+                size_bytes: thumb_size,
+                selected: false,
+            });
+        }
+    }
+
+    // 4. Delivery Optimization Cache
+    let delivery_cache = PathBuf::from(&system_root)
+        .join("ServiceProfiles")
+        .join("NetworkService")
+        .join("AppData")
+        .join("Local")
+        .join("Microsoft")
+        .join("Windows")
+        .join("DeliveryOptimization")
+        .join("Cache");
+    if delivery_cache.exists() && delivery_cache.is_dir() {
+        let (c, s) = count_dir_fast(&delivery_cache, 0);
+        if c > 0 || s > 0 {
+            items.push(SystemCleanItem {
+                id: "delivery_opt".to_string(),
+                name: "Кэш оптимизации доставки Windows (P2P)".to_string(),
+                category: "Сеть".to_string(),
+                description: "Фрагменты обновлений, кэшируемые службой Delivery Optimization для локальной раздачи.".to_string(),
+                paths: vec![delivery_cache],
+                file_count: c,
+                size_bytes: s,
+                selected: true,
+            });
+        }
+    }
+
+    // 5. User Temp Directory
+    if temp_dir.exists() && temp_dir.is_dir() {
+        let (c, s) = count_dir_fast(&temp_dir, 0);
+        items.push(SystemCleanItem {
+            id: "user_temp".to_string(),
+            name: "Временные файлы пользователя (%TEMP%)".to_string(),
+            category: "Временные файлы".to_string(),
+            description: "Временные файлы пользовательских программ, инсталляторов и архиваторов.".to_string(),
+            paths: vec![temp_dir],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 6. Windows Temp Directory
+    let win_temp = PathBuf::from(&system_root).join("Temp");
+    if win_temp.exists() && win_temp.is_dir() {
+        let (c, s) = count_dir_fast(&win_temp, 0);
+        items.push(SystemCleanItem {
+            id: "win_temp".to_string(),
+            name: "Системные временные файлы (Windows\\Temp)".to_string(),
+            category: "Временные файлы".to_string(),
+            description: "Временные файлы системных служб и фоновых обновлений Windows.".to_string(),
+            paths: vec![win_temp],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 7. DirectX D3D Shader Cache
+    let d3d_cache = PathBuf::from(&local_appdata).join("D3DSCache");
+    if d3d_cache.exists() && d3d_cache.is_dir() {
+        let (c, s) = count_dir_fast(&d3d_cache, 0);
+        if c > 0 || s > 0 {
+            items.push(SystemCleanItem {
+                id: "d3d_cache".to_string(),
+                name: "Кэш шейдеров Direct3D (D3DSCache)".to_string(),
+                category: "Графика".to_string(),
+                description: "Скомпилированный системный кэш шейдеров DirectX графических адаптеров.".to_string(),
+                paths: vec![d3d_cache],
+                file_count: c,
+                size_bytes: s,
+                selected: true,
+            });
+        }
+    }
+
+    items
+}
+
+pub fn clean_system_clean_items(items: &[SystemCleanItem]) -> (usize, u64) {
+    let mut deleted_files = 0;
+    let mut deleted_bytes = 0;
+
+    for item in items {
+        if !item.selected {
+            continue;
+        }
+        for path in &item.paths {
+            if path.is_file() {
+                let sz = path.metadata().map(|m| m.len()).unwrap_or(0);
+                if std::fs::remove_file(path).is_ok() {
+                    deleted_files += 1;
+                    deleted_bytes += sz;
+                }
+            } else if path.is_dir() {
+                delete_dir_contents_safe(path, &mut deleted_files, &mut deleted_bytes);
+            }
+        }
+    }
+
+    (deleted_files, deleted_bytes)
+}
+
+#[derive(Debug)]
+pub enum SystemCleanTaskMsg {
+    ScanFinished(Vec<SystemCleanItem>),
+    CleanFinished { files: usize, bytes: u64, refreshed_items: Vec<SystemCleanItem> },
+}
+
+pub fn spawn_system_clean_scan(tx: std::sync::mpsc::Sender<SystemCleanTaskMsg>) {
+    std::thread::spawn(move || {
+        let items = scan_system_clean_items();
+        let _ = tx.send(SystemCleanTaskMsg::ScanFinished(items));
+    });
+}
+
+pub fn spawn_system_clean_delete(items: Vec<SystemCleanItem>, tx: std::sync::mpsc::Sender<SystemCleanTaskMsg>) {
+    std::thread::spawn(move || {
+        let (files, bytes) = clean_system_clean_items(&items);
+        let refreshed = scan_system_clean_items();
+        let _ = tx.send(SystemCleanTaskMsg::CleanFinished {
+            files,
+            bytes,
+            refreshed_items: refreshed,
+        });
+    });
+}
+
+// ============================================================================
+// 2. Developer Environments Cleaner (npm, pip, cargo, go, nuget, gradle)
+// ============================================================================
+
+#[derive(Clone, Debug)]
+pub struct DevCleanItem {
+    pub id: String,
+    pub name: String,
+    pub ecosystem: String,
+    pub description: String,
+    pub paths: Vec<PathBuf>,
+    pub file_count: usize,
+    pub size_bytes: u64,
+    pub selected: bool,
+}
+
+pub fn scan_dev_clean_items() -> Vec<DevCleanItem> {
+    let mut items = Vec::new();
+
+    let local_appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let appdata = std::env::var("APPDATA").unwrap_or_default();
+    let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
+
+    // 1. Node.js npm cache
+    let mut npm_paths = Vec::new();
+    let npm_local = PathBuf::from(&local_appdata).join("npm-cache");
+    if npm_local.exists() { npm_paths.push(npm_local); }
+    let npm_roaming = PathBuf::from(&appdata).join("npm-cache");
+    if npm_roaming.exists() { npm_paths.push(npm_roaming); }
+
+    if !npm_paths.is_empty() {
+        let (c, s) = sum_paths_fast(&npm_paths);
+        items.push(DevCleanItem {
+            id: "npm_cache".to_string(),
+            name: "Node.js (npm cache)".to_string(),
+            ecosystem: "JavaScript".to_string(),
+            description: "Кэш загруженных tarball-архивов и метаданных npm. Легко пересоздается при npm install.".to_string(),
+            paths: npm_paths,
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 2. Yarn Cache
+    let yarn_cache = PathBuf::from(&local_appdata).join("Yarn").join("Cache");
+    if yarn_cache.exists() {
+        let (c, s) = count_dir_fast(&yarn_cache, 0);
+        items.push(DevCleanItem {
+            id: "yarn_cache".to_string(),
+            name: "Yarn Cache".to_string(),
+            ecosystem: "JavaScript".to_string(),
+            description: "Глобальный оффлайн-кэш пакетов Yarn v1.".to_string(),
+            paths: vec![yarn_cache],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 3. pnpm Store
+    let pnpm_store = PathBuf::from(&local_appdata).join("pnpm").join("store");
+    if pnpm_store.exists() {
+        let (c, s) = count_dir_fast(&pnpm_store, 0);
+        items.push(DevCleanItem {
+            id: "pnpm_store".to_string(),
+            name: "pnpm Content-Addressable Store".to_string(),
+            ecosystem: "JavaScript".to_string(),
+            description: "Хранилище пакетов pnpm. Очистка освобождает неиспользуемые версии пакетов.".to_string(),
+            paths: vec![pnpm_store],
+            file_count: c,
+            size_bytes: s,
+            selected: false,
+        });
+    }
+
+    // 4. Python pip cache
+    let pip_cache = PathBuf::from(&local_appdata).join("pip").join("cache");
+    if pip_cache.exists() {
+        let (c, s) = count_dir_fast(&pip_cache, 0);
+        items.push(DevCleanItem {
+            id: "pip_cache".to_string(),
+            name: "Python (pip cache)".to_string(),
+            ecosystem: "Python".to_string(),
+            description: "Кэш загруженных wheel и source-пакетов pip (PyPI).".to_string(),
+            paths: vec![pip_cache],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 5. Rust Cargo package archives
+    let cargo_crate_cache = PathBuf::from(&user_profile).join(".cargo").join("registry").join("cache");
+    if cargo_crate_cache.exists() {
+        let (c, s) = count_dir_fast(&cargo_crate_cache, 0);
+        items.push(DevCleanItem {
+            id: "cargo_crate_cache".to_string(),
+            name: "Rust (Cargo .crate архивы)".to_string(),
+            ecosystem: "Rust".to_string(),
+            description: "Сжатые .crate архивы исходников crates.io. Не влияет на скомпилированные проекты.".to_string(),
+            paths: vec![cargo_crate_cache],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 6. Rust Cargo git checkouts
+    let cargo_git = PathBuf::from(&user_profile).join(".cargo").join("git").join("checkouts");
+    if cargo_git.exists() {
+        let (c, s) = count_dir_fast(&cargo_git, 0);
+        items.push(DevCleanItem {
+            id: "cargo_git_cache".to_string(),
+            name: "Rust (Cargo Git checkouts)".to_string(),
+            ecosystem: "Rust".to_string(),
+            description: "Склонированные ветки git-зависимостей Cargo.".to_string(),
+            paths: vec![cargo_git],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 7. Go Build Cache
+    let go_build = PathBuf::from(&local_appdata).join("go-build");
+    if go_build.exists() {
+        let (c, s) = count_dir_fast(&go_build, 0);
+        items.push(DevCleanItem {
+            id: "go_build".to_string(),
+            name: "Go (go-build cache)".to_string(),
+            ecosystem: "Go".to_string(),
+            description: "Кэш промежуточных объектных файлов компилятора Go.".to_string(),
+            paths: vec![go_build],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 8. NuGet package cache
+    let nuget_cache = PathBuf::from(&user_profile).join(".nuget").join("packages");
+    if nuget_cache.exists() {
+        let (c, s) = count_dir_fast(&nuget_cache, 0);
+        items.push(DevCleanItem {
+            id: "nuget_packages".to_string(),
+            name: ".NET (NuGet Packages)".to_string(),
+            ecosystem: ".NET".to_string(),
+            description: "Глобальная папка загруженных NuGet-пакетов .NET / C#.".to_string(),
+            paths: vec![nuget_cache],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 9. Gradle Caches
+    let gradle_cache = PathBuf::from(&user_profile).join(".gradle").join("caches");
+    if gradle_cache.exists() {
+        let (c, s) = count_dir_fast(&gradle_cache, 0);
+        items.push(DevCleanItem {
+            id: "gradle_cache".to_string(),
+            name: "Java / Android (Gradle caches)".to_string(),
+            ecosystem: "Java".to_string(),
+            description: "Кэш скачанных JAR/AAR артефактов и скомпилированных скриптов сборщика Gradle.".to_string(),
+            paths: vec![gradle_cache],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 10. Maven repository
+    let m2_repo = PathBuf::from(&user_profile).join(".m2").join("repository");
+    if m2_repo.exists() {
+        let (c, s) = count_dir_fast(&m2_repo, 0);
+        items.push(DevCleanItem {
+            id: "m2_repo".to_string(),
+            name: "Java (Maven .m2 repository)".to_string(),
+            ecosystem: "Java".to_string(),
+            description: "Локальный репозиторий библиотек Maven.".to_string(),
+            paths: vec![m2_repo],
+            file_count: c,
+            size_bytes: s,
+            selected: true,
+        });
+    }
+
+    // 11. JetBrains IDE caches
+    let jb_root = PathBuf::from(&local_appdata).join("JetBrains");
+    if jb_root.exists() && jb_root.is_dir() {
+        let mut jb_caches = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&jb_root) {
+            for entry in entries.flatten() {
+                let cache_dir = entry.path().join("caches");
+                if cache_dir.exists() && cache_dir.is_dir() {
+                    jb_caches.push(cache_dir);
+                }
+            }
+        }
+        if !jb_caches.is_empty() {
+            let (c, s) = sum_paths_fast(&jb_caches);
+            items.push(DevCleanItem {
+                id: "jetbrains_caches".to_string(),
+                name: "JetBrains IDEs (системные кэши и индексы)".to_string(),
+                ecosystem: "JetBrains".to_string(),
+                description: "Индексы проектов и кэши IntelliJ IDEA, PyCharm, RustRover, WebStorm, CLion.".to_string(),
+                paths: jb_caches,
+                file_count: c,
+                size_bytes: s,
+                selected: false,
+            });
+        }
+    }
+
+    items
+}
+
+fn sum_paths_fast(paths: &[PathBuf]) -> (usize, u64) {
+    let mut total_count = 0;
+    let mut total_size = 0;
+    for p in paths {
+        let (c, s) = count_dir_fast(p, 0);
+        total_count += c;
+        total_size += s;
+    }
+    (total_count, total_size)
+}
+
+pub fn clean_dev_clean_items(items: &[DevCleanItem]) -> (usize, u64) {
+    let mut deleted_files = 0;
+    let mut deleted_bytes = 0;
+
+    for item in items {
+        if !item.selected {
+            continue;
+        }
+        for path in &item.paths {
+            if path.is_file() {
+                let sz = path.metadata().map(|m| m.len()).unwrap_or(0);
+                if std::fs::remove_file(path).is_ok() {
+                    deleted_files += 1;
+                    deleted_bytes += sz;
+                }
+            } else if path.is_dir() {
+                delete_dir_contents_safe(path, &mut deleted_files, &mut deleted_bytes);
+            }
+        }
+    }
+
+    (deleted_files, deleted_bytes)
+}
+
+#[derive(Debug)]
+pub enum DevCleanTaskMsg {
+    ScanFinished(Vec<DevCleanItem>),
+    CleanFinished { files: usize, bytes: u64, refreshed_items: Vec<DevCleanItem> },
+}
+
+pub fn spawn_dev_clean_scan(tx: std::sync::mpsc::Sender<DevCleanTaskMsg>) {
+    std::thread::spawn(move || {
+        let items = scan_dev_clean_items();
+        let _ = tx.send(DevCleanTaskMsg::ScanFinished(items));
+    });
+}
+
+pub fn spawn_dev_clean_delete(items: Vec<DevCleanItem>, tx: std::sync::mpsc::Sender<DevCleanTaskMsg>) {
+    std::thread::spawn(move || {
+        let (files, bytes) = clean_dev_clean_items(&items);
+        let refreshed = scan_dev_clean_items();
+        let _ = tx.send(DevCleanTaskMsg::CleanFinished {
+            files,
+            bytes,
+            refreshed_items: refreshed,
+        });
+    });
+}
+
+// ============================================================================
+// 3. Windows Services & Zombie Hunter
+// ============================================================================
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceFilter {
+    All,
+    Zombies,
+    ThirdParty,
+    Drivers,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ServiceStartupType {
+    Boot,
+    System,
+    Automatic,
+    Manual,
+    Disabled,
+    Unknown(u32),
+}
+
+impl ServiceStartupType {
+    pub fn from_u32(val: u32) -> Self {
+        match val {
+            0 => ServiceStartupType::Boot,
+            1 => ServiceStartupType::System,
+            2 => ServiceStartupType::Automatic,
+            3 => ServiceStartupType::Manual,
+            4 => ServiceStartupType::Disabled,
+            other => ServiceStartupType::Unknown(other),
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ServiceStartupType::Boot => "Boot (Загрузка)",
+            ServiceStartupType::System => "System (Ядро)",
+            ServiceStartupType::Automatic => "Автоматически",
+            ServiceStartupType::Manual => "Вручную",
+            ServiceStartupType::Disabled => "Отключена",
+            ServiceStartupType::Unknown(_) => "Неизвестно",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ServiceItem {
+    pub name: String,
+    pub display_name: String,
+    pub description: String,
+    pub image_path: String,
+    pub binary_path: Option<String>,
+    pub startup_type: ServiceStartupType,
+    pub is_driver: bool,
+    pub is_third_party: bool,
+    pub is_zombie: bool,
+    pub status_text: String,
+}
+
+#[cfg(windows)]
+pub fn expand_env_strings(input: &str) -> String {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::ffi::{OsStr, OsString};
+
+    extern "system" {
+        fn ExpandEnvironmentStringsW(
+            lpSrc: *const u16,
+            lpDst: *mut u16,
+            nSize: u32,
+        ) -> u32;
+    }
+
+    let wide_src: Vec<u16> = OsStr::new(input).encode_wide().chain(std::iter::once(0)).collect();
+    let needed = unsafe { ExpandEnvironmentStringsW(wide_src.as_ptr(), std::ptr::null_mut(), 0) };
+    if needed == 0 {
+        return input.to_string();
+    }
+
+    let mut buf: Vec<u16> = vec![0; needed as usize];
+    let copied = unsafe { ExpandEnvironmentStringsW(wide_src.as_ptr(), buf.as_mut_ptr(), needed) };
+    if copied == 0 || copied > needed {
+        return input.to_string();
+    }
+
+    if let Some(&0) = buf.last() {
+        buf.pop();
+    }
+    OsString::from_wide(&buf).to_string_lossy().to_string()
+}
+
+#[cfg(not(windows))]
+pub fn expand_env_strings(input: &str) -> String {
+    input.to_string()
+}
+
+#[cfg(windows)]
+pub fn resolve_mui_string(input: &str) -> String {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::ffi::{OsStr, OsString};
+
+    let trimmed = input.trim();
+    if !trimmed.starts_with('@') {
+        return trimmed.to_string();
+    }
+
+    extern "system" {
+        fn LoadLibraryA(lpLibFileName: *const u8) -> *mut std::ffi::c_void;
+        fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const u8) -> *mut std::ffi::c_void;
+    }
+
+    #[allow(non_snake_case)]
+    type SHLoadIndirectStringFn = unsafe extern "system" fn(
+        pszSource: *const u16,
+        pszOutBuf: *mut u16,
+        cchOutBuf: u32,
+        ppvReserved: *mut std::ffi::c_void,
+    ) -> i32;
+
+    unsafe {
+        let shlwapi = LoadLibraryA(b"shlwapi.dll\0".as_ptr());
+        if !shlwapi.is_null() {
+            let func_ptr = GetProcAddress(shlwapi, b"SHLoadIndirectString\0".as_ptr());
+            if !func_ptr.is_null() {
+                let func: SHLoadIndirectStringFn = std::mem::transmute(func_ptr);
+                let wide_src: Vec<u16> = OsStr::new(trimmed).encode_wide().chain(std::iter::once(0)).collect();
+                let mut buf: Vec<u16> = vec![0; 512];
+                let hr = func(wide_src.as_ptr(), buf.as_mut_ptr(), buf.len() as u32, std::ptr::null_mut());
+                if hr >= 0 {
+                    if let Some(pos) = buf.iter().position(|&c| c == 0) {
+                        buf.truncate(pos);
+                    }
+                    let res = OsString::from_wide(&buf).to_string_lossy().to_string();
+                    if !res.trim().is_empty() {
+                        return res;
+                    }
+                }
+            }
+        }
+    }
+
+    // Friendly fallback: extract stem of the resource file
+    if let Some(comma_pos) = trimmed.rfind(',') {
+        let file_part = &trimmed[1..comma_pos];
+        let expanded = expand_env_strings(file_part);
+        if let Some(stem) = Path::new(&expanded).file_stem() {
+            let stem_str = stem.to_string_lossy();
+            if !stem_str.is_empty() {
+                return stem_str.to_string();
+            }
+        }
+    }
+
+    trimmed.trim_start_matches('@').to_string()
+}
+
+#[cfg(not(windows))]
+pub fn resolve_mui_string(input: &str) -> String {
+    input.to_string()
+}
+
+pub fn extract_binary_path_from_image_path(raw: &str) -> Option<String> {
+    let mut s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+
+    // Strip leading \??\
+    if s.starts_with(r"\??\") {
+        s = &s[4..];
+    }
+
+    // Expand all environment variables natively
+    let expanded = expand_env_strings(s);
+    let mut s = expanded.trim();
+
+    let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let resolved_str;
+    if s.to_lowercase().starts_with(r"\systemroot\") {
+        resolved_str = format!("{}{}", sys_root, &s[11..]);
+        s = &resolved_str;
+    } else if s.to_lowercase().starts_with(r"system32\") {
+        resolved_str = format!(r"{}\{}", sys_root, s);
+        s = &resolved_str;
+    }
+
+    // If starts with quote: "C:\path to\app.exe" /arg
+    if s.starts_with('"') {
+        let rest = &s[1..];
+        if let Some(end_quote) = rest.find('"') {
+            let path = &rest[..end_quote];
+            return Some(path.to_string());
+        }
+    }
+
+    // If no quotes, check if the full string exists as a file
+    if Path::new(s).is_file() {
+        return Some(s.to_string());
+    }
+
+    // Try splitting at common argument separators
+    for ext in [".exe ", ".sys ", ".dll "] {
+        if let Some(idx) = s.to_lowercase().find(ext) {
+            let path = &s[..idx + 4];
+            return Some(path.to_string());
+        }
+    }
+
+    // Try taking first token before whitespace if that file exists
+    if let Some(space_idx) = s.find(' ') {
+        let token = &s[..space_idx];
+        if Path::new(token).is_file() {
+            return Some(token.to_string());
+        }
+        return Some(token.to_string());
+    }
+
+    Some(s.to_string())
+}
+
+pub fn scan_windows_services() -> Vec<ServiceItem> {
+    let mut services = Vec::new();
+
+    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+    let services_key = match hklm.open_subkey("SYSTEM\\CurrentControlSet\\Services") {
+        Ok(k) => k,
+        Err(_) => return services,
+    };
+
+    let sys_root_lower = std::env::var("SystemRoot")
+        .unwrap_or_else(|_| r"c:\windows".to_string())
+        .to_lowercase();
+
+    for name in services_key.enum_keys().flatten() {
+        let svc_key = match services_key.open_subkey(&name) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        let raw_display_name: String = svc_key.get_value("DisplayName").unwrap_or_else(|_| name.clone());
+        let display_name = resolve_mui_string(&raw_display_name);
+        let display_name = if display_name.starts_with('@') || display_name.trim().is_empty() {
+            name.clone()
+        } else {
+            display_name
+        };
+
+        let raw_description: String = svc_key.get_value("Description").unwrap_or_default();
+        let description = if raw_description.starts_with('@') {
+            let res = resolve_mui_string(&raw_description);
+            if res.starts_with('@') { String::new() } else { res }
+        } else {
+            raw_description
+        };
+
+        let image_path: String = svc_key.get_value("ImagePath").unwrap_or_default();
+        let start_type_raw: u32 = svc_key.get_value("Start").unwrap_or(3);
+        let service_type_raw: u32 = svc_key.get_value("Type").unwrap_or(0x10);
+
+        // Type: 0x01 = Kernel Driver, 0x02 = File System Driver
+        let is_driver = (service_type_raw & 0x03) != 0;
+
+        let binary_path = extract_binary_path_from_image_path(&image_path);
+
+        // Determine if third party
+        let is_third_party = if let Some(bin) = &binary_path {
+            let bin_lower = bin.to_lowercase();
+            !bin_lower.starts_with(&sys_root_lower)
+        } else {
+            false
+        };
+
+        // Determine if zombie service:
+        // A service whose binary executable does NOT exist on the filesystem!
+        let is_zombie = if let Some(bin) = &binary_path {
+            if !bin.is_empty() {
+                let bin_lower = bin.to_lowercase();
+                let name_lower = name.to_lowercase();
+
+                // Exclude svchost or standard system wrappers
+                if bin_lower.ends_with("svchost.exe")
+                    || bin_lower.contains("system32")
+                    || bin_lower.contains("syswow64")
+                    || name_lower.starts_with("wmpnetworksvc")
+                    || name_lower.starts_with("windefend")
+                    || name_lower.starts_with("sense")
+                    || name_lower.starts_with("securityhealth")
+                    || name_lower.starts_with("wuauserv")
+                    || bin_lower.contains(r"c:\programdata\microsoft\windows defender")
+                {
+                    false
+                } else {
+                    let p = Path::new(bin);
+                    !p.exists()
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        services.push(ServiceItem {
+            name,
+            display_name,
+            description,
+            image_path,
+            binary_path,
+            startup_type: ServiceStartupType::from_u32(start_type_raw),
+            is_driver,
+            is_third_party,
+            is_zombie,
+            status_text: String::new(),
+        });
+    }
+
+    // Sort: zombie services first, then third-party, then alphabetically
+    services.sort_by(|a, b| {
+        b.is_zombie.cmp(&a.is_zombie)
+            .then_with(|| b.is_third_party.cmp(&a.is_third_party))
+            .then_with(|| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()))
+    });
+
+    services
+}
+
+#[cfg(windows)]
+#[repr(C)]
+#[allow(non_snake_case)]
+struct SHELLEXECUTEINFOW {
+    cbSize: u32,
+    fMask: u32,
+    hwnd: isize,
+    lpVerb: *const u16,
+    lpFile: *const u16,
+    lpParameters: *const u16,
+    lpDirectory: *const u16,
+    nShow: i32,
+    hInstApp: isize,
+    lpIDList: *mut std::ffi::c_void,
+    lpClass: *const u16,
+    hkeyClass: isize,
+    dwHotKey: u32,
+    hIconOrMonitor: isize,
+    hProcess: *mut std::ffi::c_void,
+}
+
+#[cfg(windows)]
+extern "system" {
+    fn ShellExecuteExW(pExecInfo: *mut SHELLEXECUTEINFOW) -> i32;
+    fn WaitForSingleObject(hHandle: *mut std::ffi::c_void, dwMilliseconds: u32) -> u32;
+    fn CloseHandle(hObject: *mut std::ffi::c_void) -> i32;
+    fn GetLastError() -> u32;
+    fn MultiByteToWideChar(
+        code_page: u32,
+        flags: u32,
+        multi_byte_str: *const u8,
+        multi_byte_len: i32,
+        wide_char_str: *mut u16,
+        wide_char_len: i32,
+    ) -> i32;
+}
+
+#[cfg(windows)]
+pub fn decode_console_output(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
+        return String::new();
+    }
+    // Check if clean valid UTF-8
+    if let Ok(s) = std::str::from_utf8(bytes) {
+        let t = s.trim();
+        if !t.is_empty() {
+            return t.to_string();
+        }
+    }
+    // Decode from OEM code page (CP866 on RU Windows)
+    unsafe {
+        let len = MultiByteToWideChar(
+            1, // CP_OEMCP
+            0,
+            bytes.as_ptr(),
+            bytes.len() as i32,
+            std::ptr::null_mut(),
+            0,
+        );
+        if len > 0 {
+            let mut wide = vec![0u16; len as usize];
+            let res = MultiByteToWideChar(
+                1, // CP_OEMCP
+                0,
+                bytes.as_ptr(),
+                bytes.len() as i32,
+                wide.as_mut_ptr(),
+                len,
+            );
+            if res > 0 {
+                let decoded = String::from_utf16_lossy(&wide).trim().to_string();
+                if !decoded.is_empty() {
+                    return decoded;
+                }
+            }
+        }
+    }
+    String::from_utf8_lossy(bytes).trim().to_string()
+}
+
+#[cfg(not(windows))]
+pub fn decode_console_output(bytes: &[u8]) -> String {
+    String::from_utf8_lossy(bytes).trim().to_string()
+}
+
+#[cfg(windows)]
+pub fn run_elevated_cmd(cmd_args: &str) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+
+    let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
+    let cmd_exe = format!(r"{}\System32\cmd.exe", system_root);
+
+    let file_wide: Vec<u16> = std::ffi::OsStr::new(&cmd_exe)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let verb_wide: Vec<u16> = std::ffi::OsStr::new("runas")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let params_str = format!("/c {}", cmd_args);
+    let params_wide: Vec<u16> = std::ffi::OsStr::new(&params_str)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: 0x00000040, // SEE_MASK_NOCLOSEPROCESS
+        hwnd: 0,
+        lpVerb: verb_wide.as_ptr(),
+        lpFile: file_wide.as_ptr(),
+        lpParameters: params_wide.as_ptr(),
+        lpDirectory: std::ptr::null(),
+        nShow: 0, // SW_HIDE
+        hInstApp: 0,
+        lpIDList: std::ptr::null_mut(),
+        lpClass: std::ptr::null(),
+        hkeyClass: 0,
+        dwHotKey: 0,
+        hIconOrMonitor: 0,
+        hProcess: std::ptr::null_mut(),
+    };
+
+    let ok = unsafe { ShellExecuteExW(&mut info) };
+    if ok != 0 {
+        if !info.hProcess.is_null() {
+            unsafe {
+                WaitForSingleObject(info.hProcess, 15_000);
+                CloseHandle(info.hProcess);
+            }
+        }
+        Ok(())
+    } else {
+        let err = unsafe { GetLastError() };
+        if err == 1223 {
+            Err("Запрос прав Администратора (UAC) был отклонен пользователем.".to_string())
+        } else {
+            Err(format!("Не удалось выполнить команду с повышением прав (код ошибки {})", err))
+        }
+    }
+}
+
+pub fn set_service_startup(service_name: &str, startup: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        // 1. Direct Registry Start DWORD attempt: 2=Auto, 3=Manual, 4=Disabled
+        let start_val: Option<u32> = match startup {
+            "auto" => Some(2),
+            "demand" => Some(3),
+            "disabled" => Some(4),
+            _ => None,
+        };
+        if let Some(val) = start_val {
+            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+            if let Ok(svc_key) = hklm.open_subkey_with_flags(&format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name), KEY_SET_VALUE) {
+                if svc_key.set_value("Start", &val).is_ok() {
+                    return Ok(());
+                }
+            }
+        }
+
+        // 2. Standard sc.exe config
+        let output = Command::new("sc.exe")
+            .args(["config", service_name, &format!("start= {}", startup)])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        if let Ok(out) = &output {
+            if out.status.success() {
+                return Ok(());
+            }
+        }
+
+        // 3. Elevated execution via native ShellExecuteExW (UAC prompt)
+        let elev_cmd = format!(r#"sc.exe config "{}" start= {}"#, service_name, startup);
+        if let Ok(_) = run_elevated_cmd(&elev_cmd) {
+            return Ok(());
+        }
+
+        let err_msg = if let Ok(out) = output {
+            let out_str = decode_console_output(&out.stdout);
+            let err_str = decode_console_output(&out.stderr);
+            if !out_str.is_empty() {
+                out_str
+            } else if !err_str.is_empty() {
+                err_str
+            } else {
+                "Отказано в доступе. Требуются права Администратора.".to_string()
+            }
+        } else {
+            "Не удалось запустить sc.exe".to_string()
+        };
+
+        Err(err_msg)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (service_name, startup);
+        Ok(())
+    }
+}
+
+pub fn delete_windows_service(service_name: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+
+        // 1. First attempt: Direct Registry Removal if we already have permissions
+        if let Ok(services_key) = hklm.open_subkey_with_flags("SYSTEM\\CurrentControlSet\\Services", KEY_ALL_ACCESS) {
+            if services_key.delete_subkey_all(service_name).is_ok() {
+                let _ = Command::new("sc.exe")
+                    .args(["delete", service_name])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .output();
+                return Ok(());
+            }
+        }
+
+        // 2. Second attempt: standard non-elevated sc.exe delete
+        let output = Command::new("sc.exe")
+            .args(["delete", service_name])
+            .creation_flags(CREATE_NO_WINDOW)
+            .output();
+
+        if let Ok(out) = &output {
+            if out.status.success() {
+                return Ok(());
+            }
+        }
+
+        // 3. Third attempt: Elevated execution via native ShellExecuteExW (UAC prompt)
+        // Stops service, deletes from SCM and purges registry key
+        let elev_cmd = format!(
+            r#"sc.exe stop "{}" & sc.exe delete "{}" & reg.exe delete "HKLM\SYSTEM\CurrentControlSet\Services\{}" /f"#,
+            service_name, service_name, service_name
+        );
+        match run_elevated_cmd(&elev_cmd) {
+            Ok(_) => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                if hklm.open_subkey(&format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name)).is_err() {
+                    return Ok(());
+                }
+            }
+            Err(uac_err) => {
+                return Err(uac_err);
+            }
+        }
+
+        // If still failed, decode error cleanly from sc.exe with OEM CP
+        let err_msg = if let Ok(out) = output {
+            let out_str = decode_console_output(&out.stdout);
+            let err_str = decode_console_output(&out.stderr);
+            if !out_str.is_empty() {
+                out_str
+            } else if !err_str.is_empty() {
+                err_str
+            } else {
+                "Отказано в доступе (ошибка 5). Требуются права Администратора.".to_string()
+            }
+        } else {
+            "Не удалось запустить sc.exe".to_string()
+        };
+
+        Err(err_msg)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = service_name;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_binary_path_quoted() {
+        let raw = r#""C:\Program Files\SomeApp\service.exe" --run"#;
+        let extracted = extract_binary_path_from_image_path(raw);
+        assert_eq!(extracted, Some(r"C:\Program Files\SomeApp\service.exe".to_string()));
+    }
+
+    #[test]
+    fn test_extract_binary_path_system_root() {
+        let raw = r"%SystemRoot%\system32\svchost.exe -k netsvcs";
+        let extracted = extract_binary_path_from_image_path(raw);
+        assert!(extracted.is_some());
+        let path = extracted.unwrap();
+        assert!(path.to_lowercase().ends_with(r"system32\svchost.exe"));
+    }
+
+    #[test]
+    fn test_startup_type_labels() {
+        assert_eq!(ServiceStartupType::Automatic.label(), "Автоматически");
+        assert_eq!(ServiceStartupType::Disabled.label(), "Отключена");
+        assert_eq!(ServiceStartupType::Manual.label(), "Вручную");
+    }
+
+    #[test]
+    fn test_scan_system_clean_items_runs_without_panic() {
+        let items = scan_system_clean_items();
+        assert!(!items.is_empty());
+    }
+
+    #[test]
+    fn test_scan_dev_clean_items_runs_without_panic() {
+        let items = scan_dev_clean_items();
+        println!("Found {} dev cache items", items.len());
+    }
+
+    #[test]
+    fn test_scan_windows_services_runs_without_panic() {
+        let services = scan_windows_services();
+        assert!(!services.is_empty(), "Should discover installed Windows services");
+    }
+}

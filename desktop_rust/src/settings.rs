@@ -151,12 +151,12 @@ pub fn apply_explorer_context_menu(enable: bool) {
     };
 
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-    let targets = [
+    let track_targets = [
         r"Software\Classes\exefile\shell",
         r"Software\Classes\Msi.Package\shell",
     ];
 
-    for parent in targets {
+    for parent in track_targets {
         if let Ok((shell_key, _)) = hkcu.create_subkey(parent) {
             if enable {
                 if let Ok((track_key, _)) = shell_key.create_subkey("PurgeCraftTrack") {
@@ -168,6 +168,27 @@ pub fn apply_explorer_context_menu(enable: bool) {
                 }
             } else {
                 let _ = shell_key.delete_subkey_all("PurgeCraftTrack");
+            }
+        }
+    }
+
+    let clean_targets = [
+        r"Software\Classes\Directory\shell",
+        r"Software\Classes\lnkfile\shell",
+    ];
+
+    for parent in clean_targets {
+        if let Ok((shell_key, _)) = hkcu.create_subkey(parent) {
+            if enable {
+                if let Ok((clean_key, _)) = shell_key.create_subkey("PurgeCraftClean") {
+                    let _ = clean_key.set_value("", &"Найти остатки через PurgeCraft");
+                    let _ = clean_key.set_value("Icon", &format!("\"{}\",0", exe_path));
+                    if let Ok((cmd_key, _)) = clean_key.create_subkey("command") {
+                        let _ = cmd_key.set_value("", &format!("\"{}\" --clean-path \"%1\"", exe_path));
+                    }
+                }
+            } else {
+                let _ = shell_key.delete_subkey_all("PurgeCraftClean");
             }
         }
     }

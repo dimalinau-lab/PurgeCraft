@@ -332,7 +332,7 @@ impl eframe::App for SetupTestLabApp {
                     let _ = std::process::Command::new(uninst_exe).arg("--uninstall").spawn();
                 }
 
-                if ui.button(RichText::new("🧹 Очистить всё").size(13.0)).on_hover_text("Полная очистка реестра и папок без следов").clicked() {
+                if ui.button(RichText::new("♻ Очистить всё").size(13.0)).on_hover_text("Полная очистка реестра и папок без следов").clicked() {
                     full_cleanup();
                     self.status = check_status();
                     self.msg = Some(("Все файлы и ветки реестра полностью удалены.".to_string(), true));

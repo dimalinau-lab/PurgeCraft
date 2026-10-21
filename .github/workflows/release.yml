@@ -1,0 +1,55 @@
+name: Release PurgeCraft
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Windows Binary
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "desktop_rust -> desktop_rust/target"
+
+      - name: Build Release Executable
+        run: cargo build --manifest-path desktop_rust/Cargo.toml --release
+
+      - name: Package Assets & Calculate Checksums
+        shell: pwsh
+        run: |
+          Copy-Item "desktop_rust/target/release/purgecraft.exe" "PurgeCraft.exe" -Force
+          Compress-Archive -Path "PurgeCraft.exe", "LICENSE", "README.md" -DestinationPath "PurgeCraft.zip" -Force
+          $hashExe = (Get-FileHash -Algorithm SHA256 "PurgeCraft.exe").Hash.ToLower()
+          $hashZip = (Get-FileHash -Algorithm SHA256 "PurgeCraft.zip").Hash.ToLower()
+          "$hashExe  PurgeCraft.exe`n$hashZip  PurgeCraft.zip" | Out-File -Encoding utf8 SHA256SUMS.txt
+          Write-Host "SHA256 PurgeCraft.exe: $hashExe"
+          Write-Host "SHA256 PurgeCraft.zip: $hashZip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            PurgeCraft.exe
+            PurgeCraft.zip
+            SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
