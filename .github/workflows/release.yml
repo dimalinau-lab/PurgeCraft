@@ -41,15 +41,25 @@ jobs:
           Write-Host "SHA256 PurgeCraft.exe: $hashExe"
           Write-Host "SHA256 PurgeCraft.zip: $hashZip"
 
+          # Extract release notes for current tag from CHANGELOG.md
+          $tag = "${{ github.ref_name }}"
+          $version = $tag -replace '^v',''
+          $changelog = Get-Content "CHANGELOG.md" -Raw
+          if ($changelog -match "(?s)## \[$version\][^\r\n]*\r?\n(.*?)(?=\r?\n---\r?\n\r?\n## \[|\Z)") {
+              $matches[1].Trim() | Out-File -Encoding utf8 "RELEASE_NOTES.md"
+          } else {
+              "PurgeCraft $tag release" | Out-File -Encoding utf8 "RELEASE_NOTES.md"
+          }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: PurgeCraft ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
           files: |
             PurgeCraft.exe
             PurgeCraft.zip
             SHA256SUMS.txt
-          generate_release_notes: true
           draft: false
           prerelease: false
         env:
