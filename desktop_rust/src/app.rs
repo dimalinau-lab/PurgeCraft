@@ -430,6 +430,53 @@ impl PurgeCraftApp {
         });
     }
 
+    pub fn lang(&self) -> crate::i18n::Language {
+        crate::i18n::Language::from_str(&self.settings.language)
+    }
+
+    pub fn any_modal_open(&self) -> bool {
+        self.settings_open
+            || self.wizard_open
+            || self.uninstall_confirm_open
+            || self.uninstall_waiting_open
+            || self.force_confirm_open
+            || self.running_processes_modal_open
+            || self.delayed_removal_modal_open
+            || self.batch_queue_open
+            || self.batch_force_open
+            || self.remove_entry_confirm_open
+            || self.add_startup_modal_open
+            || self.path_modal_open
+            || self.portable_modal_open
+            || self.runtime_modal_open
+            || self.winget_modal_open
+            || self.system_clean_modal_open
+            || self.dev_clean_modal_open
+            || self.services_modal_open
+            || self.update_modal_open
+            || self.shader_modal_open
+            || self.tracker_modal_open
+    }
+
+    pub fn close_all_modals(&mut self) {
+        self.settings_open = false;
+        self.uninstall_confirm_open = false;
+        self.force_confirm_open = false;
+        self.running_processes_modal_open = false;
+        self.delayed_removal_modal_open = false;
+        self.remove_entry_confirm_open = false;
+        self.add_startup_modal_open = false;
+        self.path_modal_open = false;
+        self.portable_modal_open = false;
+        self.runtime_modal_open = false;
+        self.winget_modal_open = false;
+        self.system_clean_modal_open = false;
+        self.dev_clean_modal_open = false;
+        self.services_modal_open = false;
+        self.update_modal_open = false;
+        self.shader_modal_open = false;
+        self.tracker_modal_open = false;
+    }
 
     pub fn refresh_data(&mut self) {
         let mut apps = scan_win32_apps();
@@ -920,16 +967,50 @@ impl eframe::App for PurgeCraftApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(80));
         }
 
-        // Keyboard shortcuts
-        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
-            self.refresh_data();
-        }
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            self.search_query.clear();
-        }
-        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::F)) {
-            self.focus_search_requested = true;
-        }
+        let lang = self.lang();
+
+        // Global Keyboard Shortcuts
+        ctx.input(|i| {
+            // F5 - Refresh data
+            if i.key_pressed(egui::Key::F5) {
+                self.refresh_data();
+            }
+
+            // Ctrl + 1..3 - Navigation between tabs and views
+            if i.modifiers.command {
+                if i.key_pressed(egui::Key::Num1) {
+                    self.active_tab = ActiveTab::Uninstaller;
+                    self.uninstaller_view = UninstallerViewMode::List;
+                } else if i.key_pressed(egui::Key::Num2) {
+                    self.active_tab = ActiveTab::Uninstaller;
+                    self.uninstaller_view = UninstallerViewMode::DiskTreemap;
+                } else if i.key_pressed(egui::Key::Num3) {
+                    self.active_tab = ActiveTab::Startup;
+                } else if i.key_pressed(egui::Key::F) {
+                    self.focus_search_requested = true;
+                }
+            }
+
+            // Escape - close modals or clear search
+            if i.key_pressed(egui::Key::Escape) {
+                if self.any_modal_open() {
+                    self.close_all_modals();
+                } else if !self.search_query.is_empty() {
+                    self.search_query.clear();
+                }
+            }
+
+            // Delete - uninstall selected app
+            if i.key_pressed(egui::Key::Delete) && !self.any_modal_open() {
+                if self.active_tab == ActiveTab::Uninstaller {
+                    if let Some(idx) = self.selected_app_idx {
+                        if let Some(target_app) = self.apps.get(idx).cloned() {
+                            self.start_uninstall(target_app);
+                        }
+                    }
+                }
+            }
+        });
 
         // True Dark Theme (neutral graphite/charcoal, ZERO BLUE) vs Windows Explorer Light
         if self.dark_mode {
@@ -962,92 +1043,96 @@ impl eframe::App for PurgeCraftApp {
         // 1. Menu Bar (MFC / Win32 style)
         egui::TopBottomPanel::top("top_menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("Файл", |ui| {
-                    if ui.button("📄 Экспортировать список в HTML...").clicked() {
+                ui.menu_button(crate::i18n::menu_file(lang), |ui| {
+                    if ui.button(crate::i18n::t(lang, "📄 Экспортировать список в HTML...", "📄 Export list to HTML...")).clicked() {
                         self.export_html();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Выход").clicked() {
+                    if ui.button(crate::i18n::menu_exit(lang)).clicked() {
                         std::process::exit(0);
                     }
                 });
 
-                ui.menu_button("Действие", |ui| {
+                ui.menu_button(crate::i18n::t(lang, "Действие", "Action"), |ui| {
                     let selected_count = self.batch_selected.len();
                     if selected_count > 1 {
-                        if ui.button(format!("🗑 Пакетная деинсталляция ({})", selected_count)).clicked() {
+                        if ui.button(format!("🗑 {} ({})", crate::i18n::t(lang, "Пакетная деинсталляция", "Batch Uninstall"), selected_count)).clicked() {
                             self.start_batch_uninstall();
                             ui.close_menu();
                         }
-                        if ui.button(format!("⚠ Пакетное принудительное удаление ({})", selected_count)).clicked() {
+                        if ui.button(format!("⚠ {} ({})", crate::i18n::t(lang, "Пакетное принудительное удаление", "Batch Force Removal"), selected_count)).clicked() {
                             self.start_batch_force_removal();
                             ui.close_menu();
                         }
-                        if ui.button("✕ Снять выбор со всех").clicked() {
+                        if ui.button(crate::i18n::t(lang, "✕ Снять выбор со всех", "✕ Deselect All")).clicked() {
                             self.batch_selected.clear();
                             ui.close_menu();
                         }
                     } else {
                         let selected_app_opt = self.selected_app_idx.and_then(|idx| self.apps.get(idx).cloned());
                         if let Some(app) = selected_app_opt {
-                            if ui.button("🗑 Деинсталляция...").clicked() {
+                            if ui.button(crate::i18n::btn_uninstall(lang)).clicked() {
                                 self.start_uninstall(app.clone());
                                 ui.close_menu();
                             }
-                            if ui.button("⚠ Принудительное удаление...").clicked() {
+                            if ui.button(crate::i18n::btn_force_remove(lang)).clicked() {
                                 self.force_confirm_app = Some(app.clone());
                                 self.force_confirm_open = true;
                                 ui.close_menu();
                             }
-                            if ui.button("❌ Удалить запись из списка...").clicked() {
+                            if ui.button(crate::i18n::t(lang, "❌ Удалить запись из списка...", "❌ Remove Entry from List...")).clicked() {
                                 self.remove_entry_confirm_app = Some(app.clone());
                                 self.remove_entry_confirm_open = true;
                                 ui.close_menu();
                             }
                             ui.separator();
-                            if ui.button("📁 Папка программы").clicked() {
+                            if ui.button(crate::i18n::t(lang, "📁 Папка программы", "📁 Program Folder")).clicked() {
                                 if !app.install_location.is_empty() {
                                     open_system_folder(&app.install_location, self.settings.use_total_commander);
                                 }
                                 ui.close_menu();
                             }
                             if !app.is_uwp && !app.registry_path.is_empty() {
-                                if ui.button("🗄 Запись в реестре").clicked() {
+                                if ui.button(crate::i18n::t(lang, "🗄 Запись в реестре", "🗄 Registry Entry")).clicked() {
                                     jump_to_regedit(&app.registry_path);
                                     ui.close_menu();
                                 }
                             }
-                            if ui.button("🌐 Искать в Google").clicked() {
+                            if ui.button(crate::i18n::t(lang, "🌐 Искать в Google", "🌐 Search on Google")).clicked() {
                                 let url = format!("https://www.google.com/search?q={}+{}", app.name, app.publisher);
                                 let _ = open::that(url);
                                 ui.close_menu();
                             }
                         } else {
-                            ui.label("Программа не выбрана");
+                            ui.label(crate::i18n::t(lang, "Программа не выбрана", "No program selected"));
                         }
                     }
                 });
 
-                ui.menu_button("Вид", |ui| {
-                    if ui.button("🔄 Обновить (F5)").clicked() {
+                ui.menu_button(crate::i18n::t(lang, "Вид", "View"), |ui| {
+                    if ui.button(crate::i18n::menu_refresh(lang)).clicked() {
                         self.refresh_data();
                         ui.close_menu();
                     }
                     ui.separator();
-                    let theme_menu_label = if self.dark_mode { "Переключить на светлую тему" } else { "Переключить на темную тему" };
+                    let theme_menu_label = if self.dark_mode {
+                        crate::i18n::t(lang, "Переключить на светлую тему", "Switch to Light Theme")
+                    } else {
+                        crate::i18n::t(lang, "Переключить на темную тему", "Switch to Dark Theme")
+                    };
                     if ui.button(theme_menu_label).clicked() {
                         self.dark_mode = !self.dark_mode;
                         ui.close_menu();
                     }
                 });
 
-                ui.menu_button("Помощь", |ui| {
+                ui.menu_button(crate::i18n::menu_help(lang), |ui| {
                     ui.label("PurgeCraft — Нативный деинсталлятор для Windows (Pure Rust)");
                     ui.label("100% чистая реализация по Win32 API");
                     ui.label("Поддержка Win32, UWP/Store и пакетного удаления");
                     ui.separator();
-                    if ui.button("🔄 Проверить обновления...").clicked() {
+                    if ui.button(crate::i18n::menu_check_updates(lang)).clicked() {
                         autoupdater::check_for_updates_async(
                             self.settings.github_repo.clone(),
                             env!("CARGO_PKG_VERSION").to_string(),
@@ -1056,17 +1141,17 @@ impl eframe::App for PurgeCraftApp {
                         self.update_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("🌐 Репозиторий на GitHub...").clicked() {
+                    if ui.button(crate::i18n::t(lang, "🌐 Репозиторий на GitHub...", "🌐 GitHub Repository...")).clicked() {
                         let _ = open::that(format!("https://github.com/{}", self.settings.github_repo));
                         ui.close_menu();
                     }
                 });
 
-                if ui.button("🔄 Обновить").on_hover_text("Обновить список программ (F5)").clicked() {
+                if ui.button(crate::i18n::t(lang, "🔄 Обновить", "🔄 Refresh")).on_hover_text(crate::i18n::t(lang, "Обновить список программ (F5)", "Refresh programs list (F5)")).clicked() {
                     self.refresh_data();
                 }
 
-                if ui.button("⚙ Настройки").on_hover_text("Параметры и настройки программы").clicked() {
+                if ui.button(crate::i18n::t(lang, "⚙ Настройки", "⚙ Settings")).on_hover_text(crate::i18n::t(lang, "Параметры и настройки программы", "Application settings and options")).clicked() {
                     self.temp_settings = self.settings.clone();
                     self.settings_tab = SettingsTab::General;
                     self.settings_open = true;
@@ -1074,15 +1159,15 @@ impl eframe::App for PurgeCraftApp {
 
                 match &self.update_status {
                     autoupdater::UpdateStatus::Available(info) => {
-                        if ui.button(RichText::new(format!("✨ Доступно обновление v{}", info.version)).color(Color32::from_rgb(59, 130, 246)).strong())
-                            .on_hover_text("Нажмите для просмотра и установки обновления")
+                        if ui.button(RichText::new(format!("✨ {} v{}", crate::i18n::t(lang, "Доступно обновление", "Update available"), info.version)).color(Color32::from_rgb(59, 130, 246)).strong())
+                            .on_hover_text(crate::i18n::t(lang, "Нажмите для просмотра и установки обновления", "Click to view and install update"))
                             .clicked()
                         {
                             self.update_modal_open = true;
                         }
                     }
                     autoupdater::UpdateStatus::ReadyToRestart => {
-                        if ui.button(RichText::new("🚀 Перезапустить для обновления").color(Color32::from_rgb(34, 197, 94)).strong())
+                        if ui.button(RichText::new(crate::i18n::t(lang, "🚀 Перезапустить для обновления", "🚀 Restart to update")).color(Color32::from_rgb(34, 197, 94)).strong())
                             .clicked()
                         {
                             self.update_modal_open = true;
@@ -1098,7 +1183,7 @@ impl eframe::App for PurgeCraftApp {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 // Sidebar collapse toggle button
-                let side_tip = if self.sidebar_open { "Скрыть боковую панель" } else { "Показать боковую панель" };
+                let side_tip = if self.sidebar_open { crate::i18n::t(lang, "Скрыть боковую панель", "Hide sidebar") } else { crate::i18n::t(lang, "Показать боковую панель", "Show sidebar") };
                 let side_icon = if self.sidebar_open { "◀" } else { "▶" };
                 if ui.button(RichText::new(side_icon).strong()).on_hover_text(side_tip).clicked() {
                     self.sidebar_open = !self.sidebar_open;
@@ -1133,7 +1218,7 @@ impl eframe::App for PurgeCraftApp {
                     }
                 };
 
-                let uninst_title = if self.settings.show_toolbar_labels { "📦 Деинсталлятор" } else { "📦" };
+                let uninst_title = if self.settings.show_toolbar_labels { crate::i18n::tab_uninstaller(lang) } else { "📦" };
                 let uninst_btn = egui::Button::new(
                     RichText::new(uninst_title).strong().color(uninst_text)
                 )
@@ -1160,7 +1245,7 @@ impl eframe::App for PurgeCraftApp {
                     }
                 };
 
-                let startup_title = if self.settings.show_toolbar_labels { "⚡ Автозапуск" } else { "⚡" };
+                let startup_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "⚡ Автозапуск", "⚡ Startup") } else { "⚡" };
                 let startup_btn = egui::Button::new(
                     RichText::new(startup_title).strong().color(startup_text)
                 )
@@ -1172,7 +1257,7 @@ impl eframe::App for PurgeCraftApp {
                 }
 
                 // Install Tracker
-                let tracker_title = if self.settings.show_toolbar_labels { "⚡ Следить" } else { "⚡" };
+                let tracker_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "⚡ Следить", "⚡ Track") } else { "⚡" };
                 let tracker_btn = egui::Button::new(
                     RichText::new(tracker_title)
                         .strong()
@@ -1181,7 +1266,12 @@ impl eframe::App for PurgeCraftApp {
                 .fill(if self.dark_mode { Color32::from_rgb(66, 32, 6) } else { Color32::from_rgb(254, 243, 199) })
                 .stroke(Stroke::new(1.0_f32, if self.dark_mode { Color32::from_rgb(202, 138, 4) } else { Color32::from_rgb(245, 158, 11) }));
 
-                if ui.add(tracker_btn).on_hover_text("Монитор установки (Install Tracker): отслеживать установку для 100% чистого удаления").clicked() {
+                let tracker_tip = crate::i18n::t(
+                    lang,
+                    "Монитор установки (Install Tracker): отслеживать установку для 100% чистого удаления",
+                    "Install Tracker: monitor installation for 100% clean uninstall"
+                );
+                if ui.add(tracker_btn).on_hover_text(tracker_tip).clicked() {
                     self.tracker_installer_path.clear();
                     self.tracker_app_name.clear();
                     self.tracker_traces.clear();
@@ -1191,32 +1281,32 @@ impl eframe::App for PurgeCraftApp {
                 }
 
                 // Always keep tools cleanly grouped into dropdown menu to avoid toolbar clutter
-                ui.menu_button("🛠 Утилиты ▾", |ui| {
-                    if ui.button("🎮 Шейдеры GPU...").clicked() {
+                ui.menu_button(crate::i18n::menu_tools(lang), |ui| {
+                    if ui.button(crate::i18n::t(lang, "🎮 Шейдеры GPU...", "🎮 GPU Shaders...")).clicked() {
                         self.shader_locations = scan_shader_caches();
                         self.shader_clean_msg = None;
                         self.shader_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("🗄 Санитайзер PATH...").clicked() {
+                    if ui.button(crate::i18n::menu_path(lang)).clicked() {
                         self.path_entries = scan_path_entries();
                         self.path_msg = None;
                         self.path_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("📦 Сканер Portable...").clicked() {
+                    if ui.button(crate::i18n::menu_portable(lang)).clicked() {
                         self.portable_apps = scan_portable_apps(&[], &self.apps);
                         self.portable_msg = None;
                         self.portable_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("⚖ Анализатор дубликатов VC++/Java...").clicked() {
+                    if ui.button(crate::i18n::menu_runtimes(lang)).clicked() {
                         self.runtime_groups = detect_runtime_duplicates(&self.apps);
                         self.runtime_msg = None;
                         self.runtime_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button("🚀 Менеджер Winget...").clicked() {
+                    if ui.button(crate::i18n::menu_winget(lang)).clicked() {
                         self.winget_msg = None;
                         self.winget_modal_open = true;
                         if self.winget_packages.is_empty() && !self.winget_is_busy {
@@ -1225,7 +1315,7 @@ impl eframe::App for PurgeCraftApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("♻ Очистка системы Windows...").clicked() {
+                    if ui.button(crate::i18n::menu_system_clean(lang)).clicked() {
                         self.system_clean_msg = None;
                         self.system_clean_modal_open = true;
                         if self.system_clean_items.is_empty() && !self.system_clean_is_busy {
@@ -1233,7 +1323,7 @@ impl eframe::App for PurgeCraftApp {
                         }
                         ui.close_menu();
                     }
-                    if ui.button("🛠 Кэши сред разработки (npm, cargo...)...").clicked() {
+                    if ui.button(crate::i18n::menu_dev_clean(lang)).clicked() {
                         self.dev_clean_msg = None;
                         self.dev_clean_modal_open = true;
                         if self.dev_clean_items.is_empty() && !self.dev_clean_is_busy {
@@ -1241,7 +1331,7 @@ impl eframe::App for PurgeCraftApp {
                         }
                         ui.close_menu();
                     }
-                    if ui.button("⚙ Менеджер служб и зомби...").clicked() {
+                    if ui.button(crate::i18n::menu_services(lang)).clicked() {
                         self.services_items = crate::cleaner::scan_windows_services();
                         self.services_search.clear();
                         self.services_filter = crate::cleaner::ServiceFilter::All;
@@ -1250,7 +1340,7 @@ impl eframe::App for PurgeCraftApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("📄 Экспорт списка в HTML...").clicked() {
+                    if ui.button(crate::i18n::t(lang, "📄 Экспорт списка в HTML...", "📄 Export list to HTML...")).clicked() {
                         self.export_html();
                         ui.close_menu();
                     }
@@ -1259,21 +1349,27 @@ impl eframe::App for PurgeCraftApp {
                 // Right aligned search and compact theme toggle
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let theme_icon = if self.dark_mode { "☀" } else { "🌙" };
-                    let theme_tip = if self.dark_mode { "Переключить на светлую тему" } else { "Переключить на темную тему" };
+                    let theme_tip = if self.dark_mode {
+                        crate::i18n::t(lang, "Переключить на светлую тему", "Switch to light theme")
+                    } else {
+                        crate::i18n::t(lang, "Переключить на темную тему", "Switch to dark theme")
+                    };
                     if ui.button(theme_icon).on_hover_text(theme_tip).clicked() {
                         self.dark_mode = !self.dark_mode;
                     }
 
                     if !self.search_query.is_empty() {
-                        if ui.button("✕").on_hover_text("Очистить поиск (Esc)").clicked() {
+                        let clear_tip = crate::i18n::t(lang, "Очистить поиск (Esc)", "Clear search (Esc)");
+                        if ui.button("✕").on_hover_text(clear_tip).clicked() {
                             self.search_query.clear();
                         }
                     }
 
                     let search_w = (ui.available_width() - 24.0).clamp(100.0, 180.0);
+                    let search_hint = crate::i18n::t(lang, "Поиск... (Ctrl+F)", "Search... (Ctrl+F)");
                     let search_box = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
-                            .hint_text("Поиск... (Ctrl+F)")
+                            .hint_text(search_hint)
                             .desired_width(search_w)
                     );
                     if self.focus_search_requested {
@@ -1303,9 +1399,9 @@ impl eframe::App for PurgeCraftApp {
                     let total_32 = self.apps.iter().filter(|a| !a.is_64bit).count();
 
                     // Primary Category Tabs
-                    ui.selectable_value(&mut self.category, AppCategory::All, format!("Все ({})", total_all));
-                    ui.selectable_value(&mut self.category, AppCategory::UserApps, format!("Программы ({})", total_user));
-                    ui.selectable_value(&mut self.category, AppCategory::System, format!("Системные ({})", total_sys));
+                    ui.selectable_value(&mut self.category, AppCategory::All, format!("{} ({})", crate::i18n::filter_all(lang), total_all));
+                    ui.selectable_value(&mut self.category, AppCategory::UserApps, format!("{} ({})", crate::i18n::category_user(lang), total_user));
+                    ui.selectable_value(&mut self.category, AppCategory::System, format!("{} ({})", crate::i18n::category_system(lang), total_sys));
 
                     ui.separator();
 
@@ -1322,14 +1418,14 @@ impl eframe::App for PurgeCraftApp {
                     }
 
                     let filter_title = match self.category {
-                        AppCategory::StoreApps => format!("Магазин ({}) ▾", total_store),
+                        AppCategory::StoreApps => format!("{} ({}) ▾", crate::i18n::t(lang, "Магазин", "Store"), total_store),
                         AppCategory::Portable => format!("Portable ({}) ▾", total_portable),
-                        AppCategory::Arch64 => format!("64-бит ({}) ▾", total_64),
-                        AppCategory::Arch32 => format!("32-бит ({}) ▾", total_32),
+                        AppCategory::Arch64 => format!("{} ({}) ▾", crate::i18n::t(lang, "64-бит", "64-bit"), total_64),
+                        AppCategory::Arch32 => format!("{} ({}) ▾", crate::i18n::t(lang, "32-бит", "32-bit"), total_32),
                         _ => if let Some(d) = self.drive_filter {
-                            format!("Диск {}: ▾", d)
+                            format!("{} {}: ▾", crate::i18n::filter_drive_item(lang), d)
                         } else {
-                            "Фильтры ▾".to_string()
+                            crate::i18n::filter_menu_title(lang).to_string()
                         },
                     };
 
@@ -1341,7 +1437,7 @@ impl eframe::App for PurgeCraftApp {
 
                     ui.menu_button(filter_label, |ui| {
                         if is_sub_filter_active {
-                            if ui.button("✕ Сбросить фильтры").clicked() {
+                            if ui.button(crate::i18n::filter_reset(lang)).clicked() {
                                 self.category = AppCategory::All;
                                 self.drive_filter = None;
                                 self.selected_app_idx = None;
@@ -1350,35 +1446,36 @@ impl eframe::App for PurgeCraftApp {
                             ui.separator();
                         }
 
-                        ui.label(RichText::new("Тип приложения:").size(11.0).color(Color32::GRAY));
-                        if ui.selectable_value(&mut self.category, AppCategory::Portable, format!("📦 Portable ({})", total_portable)).clicked() {
+                        ui.label(RichText::new(crate::i18n::filter_app_type_header(lang)).size(11.0).color(Color32::GRAY));
+                        if ui.selectable_value(&mut self.category, AppCategory::Portable, format!("{} ({})", crate::i18n::filter_portable_label(lang), total_portable)).clicked() {
                             self.selected_app_idx = None;
                             ui.close_menu();
                         }
-                        if ui.selectable_value(&mut self.category, AppCategory::StoreApps, format!("🏪 Магазин Windows ({})", total_store)).clicked() {
-                            self.selected_app_idx = None;
-                            ui.close_menu();
-                        }
-
-                        ui.separator();
-                        ui.label(RichText::new("Архитектура:").size(11.0).color(Color32::GRAY));
-                        if ui.selectable_value(&mut self.category, AppCategory::Arch64, format!("⚙ 64-бит ({})", total_64)).clicked() {
-                            self.selected_app_idx = None;
-                            ui.close_menu();
-                        }
-                        if ui.selectable_value(&mut self.category, AppCategory::Arch32, format!("⚙ 32-бит ({})", total_32)).clicked() {
+                        if ui.selectable_value(&mut self.category, AppCategory::StoreApps, format!("{} ({})", crate::i18n::filter_store_label(lang), total_store)).clicked() {
                             self.selected_app_idx = None;
                             ui.close_menu();
                         }
 
                         ui.separator();
-                        ui.label(RichText::new("Диск установки:").size(11.0).color(Color32::GRAY));
-                        if ui.selectable_value(&mut self.drive_filter, None, format!("💾 Все диски ({})", self.apps.len())).clicked() {
+                        ui.label(RichText::new(crate::i18n::filter_arch_header(lang)).size(11.0).color(Color32::GRAY));
+                        if ui.selectable_value(&mut self.category, AppCategory::Arch64, format!("{} ({})", crate::i18n::filter_arch_64(lang), total_64)).clicked() {
+                            self.selected_app_idx = None;
+                            ui.close_menu();
+                        }
+                        if ui.selectable_value(&mut self.category, AppCategory::Arch32, format!("{} ({})", crate::i18n::filter_arch_32(lang), total_32)).clicked() {
+                            self.selected_app_idx = None;
+                            ui.close_menu();
+                        }
+
+                        ui.separator();
+                        ui.label(RichText::new(crate::i18n::filter_drive_header(lang)).size(11.0).color(Color32::GRAY));
+                        if ui.selectable_value(&mut self.drive_filter, None, format!("{} ({})", crate::i18n::filter_all_drives(lang), self.apps.len())).clicked() {
                             self.selected_app_idx = None;
                             ui.close_menu();
                         }
                         for (&drive, &count) in &drives_count {
-                            if ui.selectable_value(&mut self.drive_filter, Some(drive), format!("💽 Диск {}: ({} прогр.)", drive, count)).clicked() {
+                            let drive_label = format!("💽 {} {}: ({} {})", crate::i18n::filter_drive_item(lang), drive, count, crate::i18n::filter_apps_suffix(lang));
+                            if ui.selectable_value(&mut self.drive_filter, Some(drive), drive_label).clicked() {
                                 self.selected_app_idx = None;
                                 ui.close_menu();
                             }
@@ -1389,8 +1486,10 @@ impl eframe::App for PurgeCraftApp {
                     let actual_new_count = self.apps.iter().filter(|a| a.is_new).count();
                     if actual_new_count > 0 {
                         ui.separator();
-                        if ui.button(RichText::new(format!("✨ Сбросить «Новое» ({})", actual_new_count)).small().color(Color32::from_rgb(234, 179, 8)))
-                            .on_hover_text("Снять отметку «Новое» со всех недавно установленных программ")
+                        let clear_new_btn_title = format!("✨ {} ({})", crate::i18n::t(lang, "Сбросить «Новое»", "Clear \"New\""), actual_new_count);
+                        let clear_new_tip = crate::i18n::t(lang, "Снять отметку «Новое» со всех недавно установленных программ", "Clear \"New\" mark from all recently installed programs");
+                        if ui.button(RichText::new(clear_new_btn_title).small().color(Color32::from_rgb(234, 179, 8)))
+                            .on_hover_text(clear_new_tip)
                             .clicked()
                         {
                             save_known_apps(&self.apps);
@@ -1398,14 +1497,14 @@ impl eframe::App for PurgeCraftApp {
                                 a.is_new = false;
                             }
                             self.new_apps_count = 0;
-                            self.status_msg = "Все отметки «Новое» успешно сняты.".to_string();
+                            self.status_msg = crate::i18n::t(lang, "Все отметки «Новое» успешно сняты.", "All \"New\" marks cleared successfully.").to_string();
                         }
                     }
 
                     // Right side: Batch counter & Compact View Switcher
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if !self.batch_selected.is_empty() {
-                            ui.label(RichText::new(format!("Выбрано: {}", self.batch_selected.len())).strong().color(Color32::from_rgb(56, 189, 248)));
+                            ui.label(RichText::new(format!("{}: {}", crate::i18n::selected_count(lang), self.batch_selected.len())).strong().color(Color32::from_rgb(56, 189, 248)));
                             ui.separator();
                         }
 
@@ -1416,16 +1515,16 @@ impl eframe::App for PurgeCraftApp {
                         let treemap_btn = ui.selectable_value(
                             &mut self.uninstaller_view,
                             UninstallerViewMode::DiskTreemap,
-                            RichText::new("📊 Treemap").color(if treemap_active { Color32::WHITE } else { Color32::GRAY }),
+                            RichText::new(crate::i18n::view_treemap_btn(lang)).color(if treemap_active { Color32::WHITE } else { Color32::GRAY }),
                         );
-                        treemap_btn.on_hover_text("Визуальная карта дискового пространства и крупнейших программ");
+                        treemap_btn.on_hover_text(crate::i18n::view_treemap_tip(lang));
 
                         let list_btn = ui.selectable_value(
                             &mut self.uninstaller_view,
                             UninstallerViewMode::List,
-                            RichText::new("📋 Список").color(if list_active { Color32::WHITE } else { Color32::GRAY }),
+                            RichText::new(crate::i18n::view_list_btn(lang)).color(if list_active { Color32::WHITE } else { Color32::GRAY }),
                         );
-                        list_btn.on_hover_text("Табличный список установленных программ");
+                        list_btn.on_hover_text(crate::i18n::view_list_tip(lang));
                     });
                 });
                 ui.add_space(3.0);
@@ -1439,15 +1538,15 @@ impl eframe::App for PurgeCraftApp {
                     let total_sm = self.startup_items.iter().filter(|i| i.source_type == "startmenu").count();
                     let total_ts = self.startup_items.iter().filter(|i| i.source_type == "taskscheduler").count();
 
-                    ui.selectable_value(&mut self.startup_filter, StartupFilter::All, format!("Все ({})", total_all));
-                    ui.selectable_value(&mut self.startup_filter, StartupFilter::Registry, format!("🗄 Реестр ({})", total_reg));
-                    ui.selectable_value(&mut self.startup_filter, StartupFilter::StartMenu, format!("📁 Меню Пуск ({})", total_sm));
-                    ui.selectable_value(&mut self.startup_filter, StartupFilter::TaskScheduler, format!("⏰ Планировщик ({})", total_ts));
+                    ui.selectable_value(&mut self.startup_filter, StartupFilter::All, format!("{} ({})", crate::i18n::startup_filter_all(lang), total_all));
+                    ui.selectable_value(&mut self.startup_filter, StartupFilter::Registry, format!("{} ({})", crate::i18n::startup_filter_registry(lang), total_reg));
+                    ui.selectable_value(&mut self.startup_filter, StartupFilter::StartMenu, format!("{} ({})", crate::i18n::startup_filter_startmenu(lang), total_sm));
+                    ui.selectable_value(&mut self.startup_filter, StartupFilter::TaskScheduler, format!("{} ({})", crate::i18n::startup_filter_taskscheduler(lang), total_ts));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let add_btn = egui::Button::new(RichText::new("➕ Добавить программу...").strong().color(Color32::WHITE))
+                        let add_btn = egui::Button::new(RichText::new(crate::i18n::startup_add_btn(lang)).strong().color(Color32::WHITE))
                             .fill(if self.dark_mode { Color32::from_rgb(16, 185, 129) } else { Color32::from_rgb(5, 150, 105) });
-                        if ui.add(add_btn).on_hover_text("Добавить новое приложение в автозапуск Windows").clicked() {
+                        if ui.add(add_btn).on_hover_text(crate::i18n::startup_add_btn_tip(lang)).clicked() {
                             self.new_startup_name.clear();
                             self.new_startup_path.clear();
                             self.new_startup_args.clear();
@@ -1470,14 +1569,17 @@ impl eframe::App for PurgeCraftApp {
                 let actual_new_count = self.apps.iter().filter(|a| a.is_new).count();
                 if actual_new_count > 0 {
                     ui.separator();
-                    ui.label(RichText::new(format!("✨ Недавно установлено: {}", actual_new_count)).color(Color32::from_rgb(234, 179, 8)).strong().small());
-                    if ui.button(RichText::new("✨ Убрать «Новое»").small()).on_hover_text("Снять отметку «Новое» со всех программ, чтобы не мешало").clicked() {
+                    let new_label = format!("✨ {}: {}", crate::i18n::t(lang, "Недавно установлено", "Recently installed"), actual_new_count);
+                    ui.label(RichText::new(new_label).color(Color32::from_rgb(234, 179, 8)).strong().small());
+                    let dismiss_btn = crate::i18n::t(lang, "✨ Убрать «Новое»", "✨ Clear \"New\"");
+                    let dismiss_tip = crate::i18n::t(lang, "Снять отметку «Новое» со всех программ, чтобы не мешало", "Dismiss \"New\" mark from all programs");
+                    if ui.button(RichText::new(dismiss_btn).small()).on_hover_text(dismiss_tip).clicked() {
                         save_known_apps(&self.apps);
                         for a in &mut self.apps {
                             a.is_new = false;
                         }
                         self.new_apps_count = 0;
-                        self.status_msg = "Все отметки «Новое» успешно сняты.".to_string();
+                        self.status_msg = crate::i18n::t(lang, "Все отметки «Новое» успешно сняты.", "All \"New\" marks cleared successfully.").to_string();
                     }
                 }
             });

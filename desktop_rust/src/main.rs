@@ -9,6 +9,7 @@ pub mod ui;
 pub mod tabs;
 pub mod modals;
 pub mod cleaner;
+pub mod i18n;
 pub mod app;
 
 use eframe::egui;
