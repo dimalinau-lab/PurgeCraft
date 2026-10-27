@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-10-27
+
+### Fixed
+- **Chromium Keyboard Shortcuts Conflict**: Disabled `accesskit` in `eframe` to prevent unwanted Windows UI Automation (UIA) registration. Resolves an issue where running PurgeCraft in the background caused Chromium-based browsers (Chrome, Edge, Brave, Yandex Browser) to swallow/block all keyboard shortcuts (`Ctrl+T`, `Ctrl+W`, `Ctrl+C`, `Ctrl+V`, `Ctrl+1..9`, etc.).
+
+### Changed
+- **Binary Size & Performance Optimization**: Stripped over 1,000 lines of unused accessibility and UIA boilerplate dependencies, reducing the release binary size by over 400 KB and speeding up application cold start.
+
+---
+
 ## [1.0.3] - 2026-10-21
 
 ### Added
