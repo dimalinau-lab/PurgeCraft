@@ -219,12 +219,13 @@ pub fn clean_uwp_package_name(raw_name: &str) -> String {
 
     let last_is_numeric = parts.last().map(|p| p.chars().all(|c| c.is_ascii_digit())).unwrap_or(false);
 
-    if parts[0].eq_ignore_ascii_case("Microsoft") || parts[0].eq_ignore_ascii_case("MicrosoftCorporationII") {
-        parts.join(" ")
-    } else if last_is_numeric {
+    if parts[0].eq_ignore_ascii_case("Microsoft")
+        || parts[0].eq_ignore_ascii_case("MicrosoftCorporationII")
+        || last_is_numeric
+    {
         parts.join(" ")
     } else if parts.len() >= 2 {
-        let last = parts.last().unwrap();
+        let last = parts.last().copied().unwrap_or("");
         if last.len() >= 3 {
             last.to_string()
         } else {
@@ -499,19 +500,15 @@ pub fn scan_win32_apps() -> Vec<InstalledApp> {
 
                     if clean_icon.is_empty() && !uninstall_str.is_empty() {
                         let trimmed = uninstall_str.trim().trim_matches('"');
-                        let exe_candidate = if let Some(exe_idx) = trimmed.to_lowercase().find(".exe") {
-                            &trimmed[..exe_idx + 4]
-                        } else {
-                            ""
-                        };
+                        let exe_candidate = crate::types::slice_through_ascii_ignore_case(trimmed, ".exe").unwrap_or("");
                         if !exe_candidate.is_empty() && Path::new(exe_candidate).exists() {
                             clean_icon = exe_candidate.to_string();
                         }
                     }
 
                     let is_steam = subkey_name.starts_with("Steam App ") || uninstall_str.contains("steam://");
-                    let steam_id = if subkey_name.starts_with("Steam App ") {
-                        Some(subkey_name[10..].trim().to_string())
+                    let steam_id = if let Some(stripped) = subkey_name.strip_prefix("Steam App ") {
+                        Some(stripped.trim().to_string())
                     } else if let Some(pos) = uninstall_str.find("steam://uninstall/") {
                         let id_part = &uninstall_str[pos + 18..];
                         let clean_id: String = id_part.chars().take_while(|c| c.is_ascii_digit()).collect();
@@ -539,12 +536,7 @@ pub fn scan_win32_apps() -> Vec<InstalledApp> {
                             parent
                         }
                     } else if !uninstall_str.trim().is_empty() && !is_steam {
-                        let clean = uninstall_str.trim().trim_matches('"');
-                        let exe_candidate = if let Some(pos) = clean.to_lowercase().find(".exe") {
-                            &clean[..pos + 4]
-                        } else {
-                            clean
-                        };
+                        let exe_candidate = crate::types::extract_exe_prefix(&uninstall_str);
                         Path::new(exe_candidate).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
                     } else {
                         String::new()
@@ -622,7 +614,7 @@ pub fn scan_win32_apps() -> Vec<InstalledApp> {
         }
     }
 
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 
@@ -800,7 +792,7 @@ pub fn scan_installed_apps() -> Vec<InstalledApp> {
     let mut epic_games = scan_epic_games(&apps);
     apps.append(&mut epic_games);
 
-    apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    apps.sort_by_key(|a| a.name.to_lowercase());
     apps
 }
 
@@ -874,12 +866,7 @@ pub fn calculate_startup_impact(name: &str, command: &str) -> StartupImpact {
     }
 
     // Executable file size heuristic if path exists
-    let clean_cmd = command.trim().trim_matches('"');
-    let exe_path = if let Some(idx) = clean_cmd.to_lowercase().find(".exe") {
-        &clean_cmd[..idx + 4]
-    } else {
-        clean_cmd
-    };
+    let exe_path = crate::types::extract_exe_prefix(command);
     if let Ok(metadata) = std::fs::metadata(exe_path) {
         let size_mb = metadata.len() / (1024 * 1024);
         if size_mb >= 30 {
@@ -1038,7 +1025,7 @@ pub fn scan_startup_items() -> Vec<StartupItem> {
         }
     }
 
-    items.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    items.sort_by_key(|a| a.name.to_lowercase());
     items
 }
 
@@ -1167,6 +1154,35 @@ pub fn pick_folder_dialog() -> Option<String> {
 }
 
 
+pub fn matches_app_token(candidate: &str, token: &str) -> bool {
+    let c = candidate.trim().to_lowercase();
+    let t = token.trim().to_lowercase();
+    if c.is_empty() || t.is_empty() {
+        return false;
+    }
+    // 1. Exact match
+    if c == t {
+        return true;
+    }
+    // 2. Strict word-boundary matching (starts/ends with delimiter or enclosed by delimiters)
+    let seps = [' ', '-', '_', '.'];
+    for &sep in &seps {
+        let prefix = format!("{}{}", t, sep);
+        if c.starts_with(&prefix) {
+            return true;
+        }
+        let suffix = format!("{}{}", sep, t);
+        if c.ends_with(&suffix) {
+            return true;
+        }
+        let infix = format!("{}{}{}", sep, t, sep);
+        if c.contains(&infix) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn get_app_tokens(app: &InstalledApp) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut add_token = |t: &str| {
@@ -1185,20 +1201,39 @@ pub fn get_app_tokens(app: &InstalledApp) -> Vec<String> {
     add_token(&safe_id);
 
     let stop_words = [
+        // Generic application/installer words
         "application", "app", "setup", "installer", "software", "suite", "version",
         "x64", "x86", "64-bit", "32-bit", "microsoft", "windows", "test", "demo",
-        "free", "trial", "tool", "tools", "update", "client", "edition", "system", "package"
+        "free", "trial", "tool", "tools", "update", "client", "edition", "system", "package",
+        // Categories, roles & common terms
+        "studio", "code", "player", "game", "games", "gaming", "launcher", "desktop",
+        "server", "service", "services", "center", "centre", "manager", "management",
+        "utility", "helper", "engine", "platform", "network", "internet", "driver", "drivers",
+        "visual", "runtime", "redistributable", "common", "shared", "support", "security",
+        "protection", "antivirus", "editor", "viewer", "reader", "browser", "media", "audio",
+        "video", "sound", "music", "controller", "config", "configuration", "assistant", "connect",
+        "plus", "professional", "enterprise", "premium", "ultimate", "community",
+        // Major vendors & ecosystems that should never be single-word tokens
+        "adobe", "google", "valve", "steam", "epic", "jetbrains", "oracle", "nvidia",
+        "intel", "amd", "electronic", "arts", "ubisoft", "blizzard", "sony", "apple",
+        "asus", "gigabyte", "msi", "lenovo", "dell", "acer", "logitech", "corsair", "razer"
     ];
     for word in app.name.split_whitespace() {
         let clean_word: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
-        if clean_word.len() >= 4 && !stop_words.contains(&clean_word.to_lowercase().as_str()) {
+        if clean_word.len() >= 4
+            && !clean_word.chars().all(|c| c.is_ascii_digit())
+            && !stop_words.contains(&clean_word.to_lowercase().as_str())
+        {
             add_token(&clean_word);
         }
     }
 
     if !app.install_location.is_empty() {
         if let Some(leaf) = Path::new(&app.install_location).file_name().and_then(|n| n.to_str()) {
-            add_token(leaf);
+            let leaf_clean: String = leaf.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+            if leaf_clean.len() >= 4 && !stop_words.contains(&leaf_clean.to_lowercase().as_str()) {
+                add_token(&leaf_clean);
+            }
         }
     }
 
@@ -1238,12 +1273,12 @@ pub fn build_app_leftover_targets(app: &InstalledApp, traced_apps: &[TracedApp])
         }
     }
 
-    // Search subkeys of HKCU\Software and HKLM\SOFTWARE matching tokens
+    // Search subkeys of HKCU\Software and HKLM\SOFTWARE matching tokens with strict boundary
     for (hive_val, hive_name) in [(HKEY_CURRENT_USER, "HKEY_CURRENT_USER"), (HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE")] {
         if let Ok(key) = RegKey::predef(hive_val).open_subkey("Software") {
             for sub in key.enum_keys().flatten() {
-                let sub_lower = sub.to_lowercase();
-                if tokens.iter().any(|tok| tok.len() >= 4 && sub_lower.contains(&tok.to_lowercase())) {
+                let sub_clean = sub.trim();
+                if tokens.iter().any(|tok| tok.len() >= 4 && matches_app_token(sub_clean, tok)) {
                     targets.push(("registry_key".to_string(), format!("{}\\{}\\{}", hive_name, "Software", sub)));
                 }
             }
@@ -1267,12 +1302,11 @@ pub fn build_app_leftover_targets(app: &InstalledApp, traced_apps: &[TracedApp])
         targets.push(("registry_key".to_string(), full_reg));
     }
 
-    // Run keys in registry
+    // Run keys in registry with strict boundary matching
     for (hive_val, hive_name) in [(HKEY_CURRENT_USER, "HKEY_CURRENT_USER"), (HKEY_LOCAL_MACHINE, "HKEY_LOCAL_MACHINE")] {
         if let Ok(key) = RegKey::predef(hive_val).open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Run") {
             for (val_name, _) in key.enum_values().flatten() {
-                let val_lower = val_name.to_lowercase();
-                if tokens.iter().any(|tok| val_lower.contains(&tok.to_lowercase())) {
+                if tokens.iter().any(|tok| matches_app_token(&val_name, tok)) {
                     targets.push(("registry_key".to_string(), format!(r"{}\Software\Microsoft\Windows\CurrentVersion\Run -> {}", hive_name, val_name)));
                 }
             }
@@ -1302,13 +1336,12 @@ pub fn build_app_leftover_targets(app: &InstalledApp, traced_apps: &[TracedApp])
             }
         }
 
-        // Subdirectories in base_dir for substring match
+        // Subdirectories in base_dir using strict boundary matching (prevents false matches like Barcode -> Code)
         if let Ok(entries) = std::fs::read_dir(&base_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
-                let name_lower = name.to_lowercase();
-                if tokens.iter().any(|tok| tok.len() >= 4 && name_lower.contains(&tok.to_lowercase())) {
+                if tokens.iter().any(|tok| tok.len() >= 4 && matches_app_token(&name, tok)) {
                     let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
                     targets.push((if is_dir { "folder".to_string() } else { "file".to_string() }, p.to_string_lossy().to_string()));
                 }
@@ -1316,14 +1349,14 @@ pub fn build_app_leftover_targets(app: &InstalledApp, traced_apps: &[TracedApp])
         }
     }
 
-    // Shortcuts: Desktop & Start Menu
+    // Shortcuts: Desktop & Start Menu using strict boundary matching
     fn scan_shortcut_dir(dir: &Path, tokens: &[String], targets: &mut Vec<(String, String)>) {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
                 let name = entry.file_name().to_string_lossy().to_string();
-                let name_lower = name.to_lowercase();
-                if tokens.iter().any(|tok| tok.len() >= 3 && name_lower.contains(&tok.to_lowercase())) {
+                let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| name.clone());
+                if tokens.iter().any(|tok| tok.len() >= 3 && (matches_app_token(&stem, tok) || matches_app_token(&name, tok))) {
                     let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
                     targets.push((if is_dir { "folder".to_string() } else { "file".to_string() }, p.to_string_lossy().to_string()));
                 }
@@ -1412,24 +1445,46 @@ fn check_target_exists(
     if t_type == "folder" || t_type == "file" {
         let p = Path::new(p_str);
         if p.exists() {
-            let norm = p_str.to_lowercase();
+            let is_dir = p.is_dir();
+            // Critical safeguard: never delete protected/system/shared root directories!
+            if is_dir && !is_safe_app_dir(p) {
+                return None;
+            }
+            let norm = p_str.to_lowercase().replace('/', "\\");
             if !norm.ends_with("program files") && !norm.ends_with("windows") && !norm.ends_with("users") {
-                let is_dir = p.is_dir();
                 let sz = if is_dir { get_folder_size(p) } else { p.metadata().map(|m| m.len()).unwrap_or(0) };
+                
+                let leaf = p.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
+                let app_id_lower = app.id.to_lowercase();
+                let app_name_lower = app.name.to_lowercase();
+                let is_exact = leaf == app_id_lower || leaf == app_name_lower 
+                    || (!app.install_location.is_empty() && norm == app.install_location.to_lowercase().replace('/', "\\"));
+                
+                let confidence = if is_exact { 98 } else { 75 };
+                let selected = is_exact || confidence >= 85;
+
                 let trace = LeftoverTrace {
                     id: format!("fs_{}", p_str),
                     app_id: app.id.clone(),
                     trace_type: if is_dir { "folder".to_string() } else { "file".to_string() },
                     path: p_str.to_string(),
                     size_bytes: if sz > 0 { sz } else { app.size_bytes },
-                    confidence: 96,
-                    selected: true,
+                    confidence,
+                    selected,
                 };
                 out.push(trace.clone());
                 return Some(trace);
             }
         }
     } else if t_type == "registry_key" {
+        let last_part = p_str.rsplit('\\').next().unwrap_or("").to_lowercase();
+        let app_id_lower = app.id.to_lowercase();
+        let app_name_lower = app.name.to_lowercase();
+        let is_exact = last_part == app_id_lower || last_part == app_name_lower
+            || (!app.registry_path.is_empty() && p_str.eq_ignore_ascii_case(&app.registry_path));
+        let confidence = if is_exact { 98 } else { 75 };
+        let selected = is_exact || confidence >= 85;
+
         if p_str.contains(" -> ") {
             let parts: Vec<&str> = p_str.split(" -> ").collect();
             if parts.len() == 2 {
@@ -1443,8 +1498,8 @@ fn check_target_exists(
                                 trace_type: "registry_key".to_string(),
                                 path: p_str.to_string(),
                                 size_bytes: 0,
-                                confidence: 98,
-                                selected: true,
+                                confidence,
+                                selected,
                             };
                             out.push(trace.clone());
                             return Some(trace);
@@ -1461,8 +1516,8 @@ fn check_target_exists(
                     trace_type: "registry_key".to_string(),
                     path: p_str.to_string(),
                     size_bytes: 0,
-                    confidence: 98,
-                    selected: true,
+                    confidence,
+                    selected,
                 };
                 out.push(trace.clone());
                 return Some(trace);
@@ -1484,11 +1539,290 @@ fn check_target_exists(
     None
 }
 
-pub fn scan_leftovers(app: &InstalledApp) -> Vec<LeftoverTrace> {
+struct AppIdentity {
+    id_lower: String,
+    name_lower: String,
+    reg_path_lower: String,
+    install_dir_lower: String,
+    names: Vec<String>,
+}
+
+const IDENTITY_GENERIC_STEMS: &[&str] = &[
+    "uninstall", "unins000", "setup", "install", "installer", "updater", "update",
+    "launcher", "helper", "application", "bin", "app", "client", "server", "service",
+    "programs", "program files", "program files (x86)", "common files", "users",
+    "appdata", "roaming", "local", "programdata", "start menu", "temp", "windows",
+    "system32", "microsoft", "msiexec", "rundll32", "cmd", "powershell", "pwsh",
+    "wscript", "cscript", "explorer", "common", "shared", "tools", "games",
+];
+
+fn normalize_fs_path_lower(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('"')
+        .trim_end_matches(['\\', '/'])
+        .replace('/', "\\")
+        .to_lowercase()
+}
+
+fn push_unique_identity_name(names: &mut Vec<String>, candidate: &str) {
+    let trimmed = candidate.trim().to_lowercase();
+    if trimmed.len() >= 3
+        && !IDENTITY_GENERIC_STEMS.contains(&trimmed.as_str())
+        && !names.iter().any(|n| n == &trimmed)
+    {
+        names.push(trimmed);
+    }
+}
+
+/// Normalizes an app display name by stripping trailing scope/arch parentheticals
+/// (e.g., `(User)`, `(64-bit)`) and trailing dotted version tokens (`2.24.0`, `v1.2`).
+fn normalize_app_base_name(raw: &str) -> String {
+    let mut s = raw.trim().to_string();
+    loop {
+        let trimmed = s.trim_end();
+        if let Some(open) = trimmed.rfind('(') {
+            if trimmed.ends_with(')') && open > 0 {
+                let prefix = trimmed[..open].trim_end();
+                if prefix.chars().count() >= 2 {
+                    s = prefix.to_string();
+                    continue;
+                }
+            }
+        }
+        break;
+    }
+
+    let mut words: Vec<&str> = s.split_whitespace().collect();
+    while words.len() > 1 {
+        let last = words[words.len() - 1];
+        let v_digits = last.strip_prefix(['v', 'V']).unwrap_or(last);
+        let is_dotted_ver = v_digits.contains('.')
+            && v_digits.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && v_digits
+                .chars()
+                .all(|c| c.is_ascii_digit() || c == '.' || c == '-' || c == '_');
+        if is_dotted_ver {
+            words.pop();
+        } else {
+            break;
+        }
+    }
+    words.join(" ").to_lowercase()
+}
+
+fn resolve_effective_install_dir_lower(app: &InstalledApp) -> String {
+    if !app.install_location.is_empty() {
+        let norm = normalize_fs_path_lower(&app.install_location);
+        if !norm.is_empty() && is_safe_app_dir(Path::new(&norm)) {
+            return norm;
+        }
+    }
+    for raw in [&app.display_icon, &app.uninstall_string] {
+        let cleaned = raw.split(',').next().unwrap_or(raw).trim();
+        if cleaned.is_empty() {
+            continue;
+        }
+        let exe = crate::types::extract_exe_prefix(cleaned);
+        if !exe.is_empty() {
+            let exe_lower = exe.to_lowercase();
+            if exe_lower.contains("\\package cache\\") {
+                continue;
+            }
+            let p = Path::new(exe);
+            let stem = p
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            if ["msiexec", "rundll32", "cmd", "powershell", "pwsh", "wscript", "cscript"]
+                .contains(&stem.as_str())
+            {
+                continue;
+            }
+            if let Some(parent) = p.parent() {
+                if is_safe_app_dir(parent) {
+                    return normalize_fs_path_lower(&parent.to_string_lossy());
+                }
+            }
+        }
+    }
+    String::new()
+}
+
+fn build_app_identity(app: &InstalledApp) -> AppIdentity {
+    let mut names = Vec::new();
+    push_unique_identity_name(&mut names, &app.name);
+    let base = normalize_app_base_name(&app.name);
+    push_unique_identity_name(&mut names, &base);
+    if let Some(open) = app.name.rfind('(') {
+        if app.name.trim_end().ends_with(')') && open > 0 {
+            push_unique_identity_name(&mut names, app.name[..open].trim());
+        }
+    }
+
+    let install_dir_lower = resolve_effective_install_dir_lower(app);
+    if !install_dir_lower.is_empty() {
+        if let Some(leaf) = Path::new(&install_dir_lower).file_name().and_then(|n| n.to_str()) {
+            push_unique_identity_name(&mut names, leaf);
+        }
+    }
+
+    let icon_cleaned = app.display_icon.split(',').next().unwrap_or(&app.display_icon).trim();
+    if !icon_cleaned.is_empty() {
+        let exe = crate::types::extract_exe_prefix(icon_cleaned);
+        if let Some(stem) = Path::new(exe).file_stem().and_then(|n| n.to_str()) {
+            push_unique_identity_name(&mut names, stem);
+        }
+    }
+
+    AppIdentity {
+        id_lower: app.id.trim().to_lowercase(),
+        name_lower: app.name.trim().to_lowercase(),
+        reg_path_lower: app.registry_path.trim().to_lowercase(),
+        install_dir_lower,
+        names,
+    }
+}
+
+fn build_other_app_identities(target: &AppIdentity, other_apps: &[InstalledApp]) -> Vec<AppIdentity> {
+    other_apps
+        .iter()
+        .filter(|o| {
+            let oid = o.id.trim().to_lowercase();
+            let oname = o.name.trim().to_lowercase();
+            oid != target.id_lower && oname != target.name_lower
+        })
+        .map(build_app_identity)
+        .collect()
+}
+
+/// Scores how specifically a lowercase candidate segment matches an app identity:
+/// `(2, len)` exact match, `(1, len)` separator-delimited token match, `(0, 0)` none.
+fn best_identity_match_score(candidate_lower: &str, names: &[String]) -> (u8, usize) {
+    let mut best = (0u8, 0usize);
+    for name in names {
+        if candidate_lower == name {
+            best = best.max((2, name.len()));
+        } else if matches_app_token(candidate_lower, name) {
+            best = best.max((1, name.len()));
+        }
+    }
+    best
+}
+
+fn is_candidate_claimed_by_other(
+    candidate_lower: &str,
+    target: &AppIdentity,
+    other: &AppIdentity,
+) -> bool {
+    if candidate_lower.is_empty() || IDENTITY_GENERIC_STEMS.contains(&candidate_lower) {
+        return false;
+    }
+    let target_score = best_identity_match_score(candidate_lower, &target.names);
+    let other_score = best_identity_match_score(candidate_lower, &other.names);
+    other_score > target_score
+}
+
+fn belongs_to_other_installed_app(
+    trace: &LeftoverTrace,
+    target: &AppIdentity,
+    others: &[AppIdentity],
+) -> bool {
+    if others.is_empty() {
+        return false;
+    }
+
+    if trace.trace_type == "registry_key" {
+        let key_part = trace
+            .path
+            .split(" -> ")
+            .next()
+            .unwrap_or(&trace.path)
+            .trim()
+            .to_lowercase();
+        let leaf = key_part.rsplit('\\').next().unwrap_or("");
+        for other in others {
+            if !other.reg_path_lower.is_empty()
+                && other.reg_path_lower != target.reg_path_lower
+                && (key_part == other.reg_path_lower
+                    || key_part.starts_with(&format!("{}\\", other.reg_path_lower)))
+            {
+                return true;
+            }
+            if !other.id_lower.is_empty()
+                && other.id_lower != target.id_lower
+                && leaf == other.id_lower
+            {
+                return true;
+            }
+            if leaf != target.id_lower && is_candidate_claimed_by_other(leaf, target, other) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if trace.trace_type != "folder" && trace.trace_type != "file" {
+        return false;
+    }
+
+    let norm_path = normalize_fs_path_lower(&trace.path);
+    let cand_path = Path::new(&norm_path);
+    let raw_leaf = cand_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let stripped_leaf = if trace.trace_type == "file" {
+        cand_path
+            .file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&raw_leaf)
+            .to_lowercase()
+    } else {
+        raw_leaf.clone()
+    };
+
+    for other in others {
+        if !other.install_dir_lower.is_empty() && other.install_dir_lower != target.install_dir_lower {
+            let other_path = Path::new(&other.install_dir_lower);
+            if cand_path.starts_with(other_path) || other_path.starts_with(cand_path) {
+                return true;
+            }
+        }
+        if is_candidate_claimed_by_other(&stripped_leaf, target, other)
+            || (raw_leaf != stripped_leaf && is_candidate_claimed_by_other(&raw_leaf, target, other))
+        {
+            return true;
+        }
+        // Also guard nested paths under another app's folder (e.g. `Start Menu\Programs\Antigravity IDE\foo.lnk`).
+        if let Some(parent) = cand_path.parent() {
+            if is_safe_app_dir(parent) {
+                let parent_leaf = parent
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_lowercase();
+                if is_candidate_claimed_by_other(&parent_leaf, target, other) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub fn scan_leftovers(app: &InstalledApp, other_apps: &[InstalledApp]) -> Vec<LeftoverTrace> {
     let targets = build_app_leftover_targets(app, &[]);
+    let target_id = build_app_identity(app);
+    let other_ids = build_other_app_identities(&target_id, other_apps);
     let mut traces = Vec::new();
     for (t_type, p_str) in &targets {
-        check_target_exists(t_type, p_str, app, &mut traces);
+        if let Some(trace) = check_target_exists(t_type, p_str, app, &mut traces) {
+            if belongs_to_other_installed_app(&trace, &target_id, &other_ids) {
+                traces.pop();
+            }
+        }
     }
     let mut seen = HashSet::new();
     traces.retain(|t| seen.insert(t.path.to_lowercase()));
@@ -1603,9 +1937,17 @@ pub fn delete_dir_contents_safe(dir: &Path, deleted_files: &mut usize, deleted_b
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let p = entry.path();
-            if let Ok(meta) = entry.metadata() {
+            // Use symlink_metadata so NTFS junctions / symlinks are never traversed into external targets
+            if let Ok(meta) = std::fs::symlink_metadata(&p) {
+                if meta.file_type().is_symlink() {
+                    if std::fs::remove_dir(&p).is_ok() || std::fs::remove_file(&p).is_ok() {
+                        *deleted_files += 1;
+                    }
+                    continue;
+                }
                 let mut perms = meta.permissions();
                 if perms.readonly() {
+                    #[allow(clippy::permissions_set_readonly_false)]
                     perms.set_readonly(false);
                     let _ = std::fs::set_permissions(&p, perms);
                 }
@@ -1651,6 +1993,7 @@ pub fn broadcast_environment_change() {
         .chain(std::iter::once(0))
         .collect();
     let mut result: usize = 0;
+    // SAFETY: `env_str` is valid null-terminated UTF-16 alive for the duration of `SendMessageTimeoutW`.
     unsafe {
         SendMessageTimeoutW(
             HWND_BROADCAST,
@@ -2239,15 +2582,14 @@ pub fn cleanup_dead_winget_registry(package_id: &str) -> bool {
                     if let Ok(app_key) = uninstall_key.open_subkey_with_flags(&subkey_name, KEY_READ | flags) {
                         let disp = get_string_value(&app_key, "DisplayName").to_lowercase();
                         let disp_compact: String = disp.chars().filter(|c| c.is_alphanumeric()).collect();
-                        if !disp.is_empty() {
-                            if disp == clean_target
+                        if !disp.is_empty()
+                            && (disp == clean_target
                                 || disp_compact == clean_target_no_dots
                                 || disp_compact == last_part
                                 || disp.contains(&last_part)
-                                || (!last_part.is_empty() && last_part.contains(&disp_compact))
-                            {
-                                is_match = true;
-                            }
+                                || (!last_part.is_empty() && last_part.contains(&disp_compact)))
+                        {
+                            is_match = true;
                         }
                     }
                 }
@@ -2296,6 +2638,7 @@ pub fn is_any_process_running_hint(hint: &str) -> bool {
         return false;
     }
 
+    // SAFETY: Iterates Win32 toolhelp process snapshot using correctly sized `PROCESSENTRY32W` and closes `snap`.
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE || snap.is_null() {
@@ -2307,7 +2650,7 @@ pub fn is_any_process_running_hint(hint: &str) -> bool {
             loop {
                 let end_idx = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
                 let exe_name = OsString::from_wide(&entry.szExeFile[..end_idx]).to_string_lossy().to_string().to_lowercase();
-                if exe_name.contains(&hint_clean) || hint_clean.contains(&exe_name.trim_end_matches(".exe")) {
+                if exe_name.contains(&hint_clean) || hint_clean.contains(exe_name.trim_end_matches(".exe")) {
                     CloseHandle(snap);
                     return true;
                 }
@@ -2337,6 +2680,7 @@ pub fn kill_processes_by_hint(hint: &str) -> bool {
     }
 
     let mut killed_any = false;
+    // SAFETY: Iterates Win32 process snapshot, terminates non-self matching PIDs via `OpenProcess`, and closes all handles.
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE || snap.is_null() {
@@ -2348,7 +2692,7 @@ pub fn kill_processes_by_hint(hint: &str) -> bool {
             loop {
                 let end_idx = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
                 let exe_name = OsString::from_wide(&entry.szExeFile[..end_idx]).to_string_lossy().to_string().to_lowercase();
-                if exe_name.contains(&hint_clean) || hint_clean.contains(&exe_name.trim_end_matches(".exe")) {
+                if exe_name.contains(&hint_clean) || hint_clean.contains(exe_name.trim_end_matches(".exe")) {
                     let pid = entry.th32ProcessID;
                     if pid != 0 && pid != std::process::id() {
                         let h_proc = OpenProcess(PROCESS_TERMINATE, 0, pid);
@@ -2399,13 +2743,13 @@ pub fn uninstall_winget_package(package_id: &str) -> Result<String, String> {
     if output.status.success() {
         Ok(format!("Пакет {} успешно удален через Winget.", package_id))
     } else {
-        if combined.contains("0x800401f5") || combined.contains("Application not found") || combined.contains("не найдено") {
-            if cleanup_dead_winget_registry(package_id) {
-                return Ok(format!(
-                    "Файлы деинсталлятора не найдены на диске (0x800401f5). Мертвая запись «{}» успешно удалена из реестра Windows.",
-                    package_id
-                ));
-            }
+        if (combined.contains("0x800401f5") || combined.contains("Application not found") || combined.contains("не найдено"))
+            && cleanup_dead_winget_registry(package_id)
+        {
+            return Ok(format!(
+                "Файлы деинсталлятора не найдены на диске (0x800401f5). Мертвая запись «{}» успешно удалена из реестра Windows.",
+                package_id
+            ));
         }
 
         Err(if combined.trim().is_empty() {
@@ -2456,13 +2800,13 @@ pub fn upgrade_winget_package(package_id: &str) -> Result<String, String> {
         };
 
         let exit_code = output.status.code().unwrap_or(-1);
-        if exit_code == 1 || err.contains("код выхода: 1") || err.contains("exit code: 1") {
-            if is_any_process_running_hint(&proc_hint) {
-                err = format!(
-                    "Сбой обновления (код выхода: 1): Приложение «{}» все еще активно в системном трее или фоне. Закройте приложение перед обновлением.",
-                    proc_hint
-                );
-            }
+        if (exit_code == 1 || err.contains("код выхода: 1") || err.contains("exit code: 1"))
+            && is_any_process_running_hint(&proc_hint)
+        {
+            err = format!(
+                "Сбой обновления (код выхода: 1): Приложение «{}» все еще активно в системном трее или фоне. Закройте приложение перед обновлением.",
+                proc_hint
+            );
         }
 
         Err(err)
@@ -2547,6 +2891,7 @@ pub fn native_delete_reg_tree(hive: winreg::HKEY, subkey: &str) -> bool {
 
     let wide_subkey: Vec<u16> = std::ffi::OsStr::new(subkey).encode_wide().chain(std::iter::once(0)).collect();
 
+    // SAFETY: `hive` is a valid predefined Win32 HKEY and `wide_subkey` is null-terminated UTF-16.
     unsafe {
         let hive_h = hive as HANDLE;
         // 1. RegDeleteTreeW recursively deletes all subkeys & values
@@ -2577,10 +2922,11 @@ pub fn clear_readonly_recursive(p: &Path) {
     if let Ok(meta) = std::fs::symlink_metadata(p) {
         if meta.permissions().readonly() {
             let mut perms = meta.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
             perms.set_readonly(false);
             let _ = std::fs::set_permissions(p, perms);
         }
-        if meta.is_dir() {
+        if meta.is_dir() && !meta.file_type().is_symlink() {
             if let Ok(entries) = std::fs::read_dir(p) {
                 for entry in entries.flatten() {
                     clear_readonly_recursive(&entry.path());
@@ -2642,6 +2988,7 @@ pub fn schedule_delayed_removal_on_reboot(path: &str) -> bool {
     use win32_api::*;
 
     let wide_path: Vec<u16> = std::ffi::OsStr::new(path).encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide_path` is valid null-terminated UTF-16 alive for the `MoveFileExW` call.
     unsafe {
         MoveFileExW(wide_path.as_ptr(), std::ptr::null(), MOVEFILE_DELAY_UNTIL_REBOOT) != 0
     }
@@ -2654,6 +3001,7 @@ pub fn schedule_delayed_removal_on_reboot(_path: &str) -> bool {
 #[cfg(windows)]
 pub fn terminate_process_by_pid(pid: u32) -> bool {
     use win32_api::*;
+    // SAFETY: Opens target PID with `PROCESS_TERMINATE` and closes handle if valid.
     unsafe {
         let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
         if handle.is_null() || handle == INVALID_HANDLE_VALUE {
@@ -2666,6 +3014,45 @@ pub fn terminate_process_by_pid(pid: u32) -> bool {
 }
 #[cfg(not(windows))]
 pub fn terminate_process_by_pid(_pid: u32) -> bool {
+    false
+}
+
+pub fn does_process_match_app(
+    install_loc: &str,
+    target_names: &[String],
+    app_name_token: &str,
+    exe_name_lower: &str,
+    full_path_lower: &str,
+) -> bool {
+    let has_safe_install_loc = !install_loc.is_empty() && is_safe_app_dir(Path::new(install_loc));
+
+    // 1. Path-component check (never raw string starts_with! Prevents `...\antigravity` from matching `...\antigravity ide\...`)
+    if has_safe_install_loc
+        && !full_path_lower.is_empty()
+        && Path::new(full_path_lower).starts_with(Path::new(install_loc))
+    {
+        return true;
+    }
+
+    // 2. Exact target executable filename match (from DisplayIcon / UninstallString)
+    if target_names.iter().any(|target| exe_name_lower == *target) {
+        return true;
+    }
+
+    // If process path is known and resides in a different directory outside `install_loc`, do not fuzzily match by app name
+    if has_safe_install_loc && !full_path_lower.is_empty() {
+        return false;
+    }
+
+    // 3. Fallback when install_location or process full_path is unavailable: exact stem equality
+    if app_name_token.len() >= 6 {
+        let exe_stem = exe_name_lower.strip_suffix(".exe").unwrap_or(exe_name_lower);
+        let proc_token: String = exe_stem.chars().filter(|c| c.is_alphanumeric()).collect();
+        if proc_token == app_name_token {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -2693,8 +3080,7 @@ pub fn find_running_processes_for_app(app: &InstalledApp) -> Vec<RunningProcessI
 
     if !app.uninstall_string.is_empty() {
         let uninst_clean = app.uninstall_string.trim_matches('"');
-        if let Some(exe_idx) = uninst_clean.to_lowercase().find(".exe") {
-            let sub = &uninst_clean[..exe_idx + 4];
+        if let Some(sub) = crate::types::slice_through_ascii_ignore_case(uninst_clean, ".exe") {
             if let Some(name) = Path::new(sub).file_name().and_then(|n| n.to_str()) {
                 target_names.push(name.to_lowercase());
             }
@@ -2716,6 +3102,7 @@ pub fn find_running_processes_for_app(app: &InstalledApp) -> Vec<RunningProcessI
     }
     let app_name_token: String = app.name.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
 
+    // SAFETY: Iterates Win32 toolhelp process snapshot, queries full image name into fixed UTF-16 buffer, and closes all handles.
     unsafe {
         let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if snap == INVALID_HANDLE_VALUE || snap.is_null() {
@@ -2746,29 +3133,13 @@ pub fn find_running_processes_for_app(app: &InstalledApp) -> Vec<RunningProcessI
                         }
 
                         let full_path_lower = full_path.to_lowercase();
-                        let mut matched = false;
-
-                        if !install_loc.is_empty() && is_safe_app_dir(Path::new(&install_loc)) {
-                            if full_path_lower.starts_with(&install_loc) {
-                                matched = true;
-                            }
-                        }
-
-                        if !matched {
-                            for target in &target_names {
-                                if &exe_name_lower == target {
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if !matched && app_name_token.len() >= 6 {
-                            let proc_token: String = exe_name.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase();
-                            if proc_token.contains(&app_name_token) || app_name_token.contains(&proc_token) {
-                                matched = true;
-                            }
-                        }
+                        let matched = does_process_match_app(
+                            &install_loc,
+                            &target_names,
+                            &app_name_token,
+                            &exe_name_lower,
+                            &full_path_lower,
+                        );
 
                         if matched {
                             result.push(RunningProcessInfo {
@@ -2815,6 +3186,7 @@ pub fn delete_trace(trace: &LeftoverTrace) -> (bool, bool) {
         if let Ok(meta) = p.metadata() {
             if meta.permissions().readonly() {
                 let mut perms = meta.permissions();
+                #[allow(clippy::permissions_set_readonly_false)]
                 perms.set_readonly(false);
                 let _ = std::fs::set_permissions(p, perms);
             }
@@ -2904,36 +3276,45 @@ pub fn delete_trace(trace: &LeftoverTrace) -> (bool, bool) {
 }
 
 pub fn is_safe_app_dir(path: &Path) -> bool {
-    if !path.is_dir() {
+    if path.exists() && !path.is_dir() {
         return false;
     }
     if path.components().count() < 2 {
         return false;
     }
-    let p_str = path.to_string_lossy().to_lowercase();
-    if p_str.ends_with(r"\steam\games") || p_str.ends_with(r"/steam/games") || p_str.contains(r"\steam\steam\games") {
+    let p_str = path.to_string_lossy().to_lowercase().replace('/', "\\");
+    if p_str.ends_with(r"\steam\games") || p_str.ends_with(r"\steam\steam\games") {
         return false;
     }
     let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_lowercase();
     let dangerous_names = [
         "windows", "system32", "syswow64", "program files", "program files (x86)",
-        "appdata", "local", "locallow", "roaming", "temp", "users", "common files", "microsoft"
+        "appdata", "local", "locallow", "roaming", "temp", "users", "common files", "microsoft",
+        // Critical protections for shared hubs and collections:
+        "games", "steamapps", "common", "tools", "bin", "programs", "applications", "shared",
+        "desktop", "downloads", "documents", "music", "pictures", "videos", "steamlibrary"
     ];
     if dangerous_names.contains(&file_name.as_str()) {
         return false;
     }
-    if p_str == "c:\\" || p_str == "d:\\" || p_str == "e:\\" || p_str.ends_with(":\\") {
+    if p_str.len() <= 3 && p_str.contains(':') {
+        return false;
+    }
+    if p_str.ends_with(r"\steamapps\common") || p_str.ends_with(r"\steamapps") || p_str.ends_with(r"\steamlibrary") {
         return false;
     }
     true
 }
 
 pub fn take_system_snapshot() -> SystemSnapshot {
-    let mut snapshot = SystemSnapshot::default();
-    snapshot.timestamp = std::time::SystemTime::now()
+    let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
+    let mut snapshot = SystemSnapshot {
+        timestamp,
+        ..Default::default()
+    };
 
     // 1. Uninstall keys
     let uninstall_paths = [
@@ -3144,10 +3525,32 @@ pub fn diff_system_snapshot(before: &SystemSnapshot, app_name: &str) -> Vec<Left
     traces
 }
 
+fn collect_tracker_watch_roots() -> Vec<(std::path::PathBuf, usize)> {
+    let mut roots = Vec::new();
+    let specs: &[(&str, usize)] = &[
+        ("TEMP", 3),
+        ("LOCALAPPDATA", 3),
+        ("APPDATA", 3),
+        ("ProgramFiles", 2),
+        ("ProgramFiles(x86)", 2),
+        ("ProgramData", 2),
+    ];
+    roots.push((std::path::PathBuf::from(r"C:\Windows\Temp"), 2));
+    for (env_var, max_depth) in specs {
+        if let Ok(val) = std::env::var(env_var) {
+            if !val.trim().is_empty() {
+                roots.push((std::path::PathBuf::from(val), *max_depth));
+            }
+        }
+    }
+    roots
+}
+
 fn scan_and_emit_fs(
     dir: &Path,
     seen_paths: &mut HashSet<String>,
     tx: &std::sync::mpsc::Sender<TrackerLiveMsg>,
+    tick_time: &str,
     depth: usize,
     max_depth: usize,
 ) {
@@ -3156,21 +3559,30 @@ fn scan_and_emit_fs(
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let is_dir = ft.is_dir();
             let p = entry.path();
-            let p_str = p.to_string_lossy().to_string();
+            let p_str = p.to_string_lossy().into_owned();
             let p_lower = p_str.to_lowercase();
-            let is_dir = entry.metadata().map(|m| m.is_dir()).unwrap_or(false);
-            if !seen_paths.contains(&p_lower) {
-                seen_paths.insert(p_lower);
-                let action = if is_dir { "Создана папка".to_string() } else { "Создан файл".to_string() };
+            if seen_paths.insert(p_lower) {
+                let action = if is_dir {
+                    "Создана папка".to_string()
+                } else {
+                    "Создан файл".to_string()
+                };
                 let _ = tx.send(TrackerLiveMsg {
-                    time: chrono::Local::now().format("%H:%M:%S").to_string(),
+                    time: tick_time.to_string(),
                     action,
                     path: p_str,
                 });
             }
             if is_dir {
-                scan_and_emit_fs(&p, seen_paths, tx, depth + 1, max_depth);
+                scan_and_emit_fs(&p, seen_paths, tx, tick_time, depth + 1, max_depth);
             }
         }
     }
@@ -3182,9 +3594,16 @@ fn record_existing_fs(dir: &Path, seen_paths: &mut HashSet<String>, depth: usize
     }
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
-            seen_paths.insert(entry.path().to_string_lossy().to_lowercase());
-            if entry.metadata().map(|m| m.is_dir()).unwrap_or(false) {
-                record_existing_fs(&entry.path(), seen_paths, depth + 1, max_depth);
+            let Ok(ft) = entry.file_type() else {
+                continue;
+            };
+            if ft.is_symlink() {
+                continue;
+            }
+            let p = entry.path();
+            seen_paths.insert(p.to_string_lossy().to_lowercase());
+            if ft.is_dir() {
+                record_existing_fs(&p, seen_paths, depth + 1, max_depth);
             }
         }
     }
@@ -3233,25 +3652,10 @@ pub fn spawn_install_tracker(
 
         let mut seen_paths = HashSet::new();
         let mut seen_reg_keys = HashSet::new();
+        let watch_roots = collect_tracker_watch_roots();
 
-        if let Ok(temp) = std::env::var("TEMP") {
-            record_existing_fs(Path::new(&temp), &mut seen_paths, 0, 3);
-        }
-        record_existing_fs(Path::new(r"C:\Windows\Temp"), &mut seen_paths, 0, 2);
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            record_existing_fs(Path::new(&local), &mut seen_paths, 0, 2);
-        }
-        if let Ok(roam) = std::env::var("APPDATA") {
-            record_existing_fs(Path::new(&roam), &mut seen_paths, 0, 2);
-        }
-        if let Ok(pf) = std::env::var("ProgramFiles") {
-            record_existing_fs(Path::new(&pf), &mut seen_paths, 0, 2);
-        }
-        if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-            record_existing_fs(Path::new(&pf86), &mut seen_paths, 0, 2);
-        }
-        if let Ok(pd) = std::env::var("ProgramData") {
-            record_existing_fs(Path::new(&pd), &mut seen_paths, 0, 2);
+        for (root, max_depth) in &watch_roots {
+            record_existing_fs(root, &mut seen_paths, 0, *max_depth);
         }
 
         // Snapshot existing registry
@@ -3273,28 +3677,15 @@ pub fn spawn_install_tracker(
             }
         }
 
-        while stop_rx.try_recv().is_err() {
-            std::thread::sleep(std::time::Duration::from_millis(120));
+        while matches!(
+            stop_rx.recv_timeout(std::time::Duration::from_millis(450)),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        ) {
+            let tick_time = now();
 
-            // 1. Filesystem scan
-            if let Ok(temp) = std::env::var("TEMP") {
-                scan_and_emit_fs(Path::new(&temp), &mut seen_paths, &tx, 0, 4);
-            }
-            scan_and_emit_fs(Path::new(r"C:\Windows\Temp"), &mut seen_paths, &tx, 0, 3);
-            if let Ok(local) = std::env::var("LOCALAPPDATA") {
-                scan_and_emit_fs(Path::new(&local), &mut seen_paths, &tx, 0, 3);
-            }
-            if let Ok(roam) = std::env::var("APPDATA") {
-                scan_and_emit_fs(Path::new(&roam), &mut seen_paths, &tx, 0, 3);
-            }
-            if let Ok(pf) = std::env::var("ProgramFiles") {
-                scan_and_emit_fs(Path::new(&pf), &mut seen_paths, &tx, 0, 3);
-            }
-            if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
-                scan_and_emit_fs(Path::new(&pf86), &mut seen_paths, &tx, 0, 3);
-            }
-            if let Ok(pd) = std::env::var("ProgramData") {
-                scan_and_emit_fs(Path::new(&pd), &mut seen_paths, &tx, 0, 3);
+            // 1. Filesystem scan (matches baseline watch_roots depths 1:1)
+            for (root, max_depth) in &watch_roots {
+                scan_and_emit_fs(root, &mut seen_paths, &tx, &tick_time, 0, *max_depth);
             }
 
             // 2. Registry scan
@@ -3303,10 +3694,9 @@ pub fn spawn_install_tracker(
                     for sub in key.enum_keys().flatten() {
                         let full = format!(r"{}\Software\{}", name, sub);
                         let full_lower = full.to_lowercase();
-                        if !seen_reg_keys.contains(&full_lower) {
-                            seen_reg_keys.insert(full_lower);
+                        if seen_reg_keys.insert(full_lower) {
                             let _ = tx.send(TrackerLiveMsg {
-                                time: now(),
+                                time: tick_time.clone(),
                                 action: "Создан ключ реестра".to_string(),
                                 path: full,
                             });
@@ -3317,10 +3707,9 @@ pub fn spawn_install_tracker(
                     for sub in key.enum_keys().flatten() {
                         let full = format!(r"{}\Software\Microsoft\Windows\CurrentVersion\Uninstall\{}", name, sub);
                         let full_lower = full.to_lowercase();
-                        if !seen_reg_keys.contains(&full_lower) {
-                            seen_reg_keys.insert(full_lower);
+                        if seen_reg_keys.insert(full_lower) {
                             let _ = tx.send(TrackerLiveMsg {
-                                time: now(),
+                                time: tick_time.clone(),
                                 action: "Создан ключ реестра".to_string(),
                                 path: full,
                             });
@@ -3331,10 +3720,9 @@ pub fn spawn_install_tracker(
                     for (val, _) in key.enum_values().flatten() {
                         let full = format!(r"{}\Software\Microsoft\Windows\CurrentVersion\Run -> {}", name, val);
                         let full_lower = full.to_lowercase();
-                        if !seen_reg_keys.contains(&full_lower) {
-                            seen_reg_keys.insert(full_lower);
+                        if seen_reg_keys.insert(full_lower) {
                             let _ = tx.send(TrackerLiveMsg {
-                                time: now(),
+                                time: tick_time.clone(),
                                 action: "Запись реестра".to_string(),
                                 path: full,
                             });
@@ -3475,13 +3863,123 @@ Antigravity 2.19.1                                           Google.Antigravity 
     fn test_scan_leftovers_test_app() {
         let apps = scan_win32_apps();
         if let Some(test_app) = apps.iter().find(|a| a.id == "PurgeCraftTestApp" || a.name.contains("PurgeCraft Test")) {
-            let traces = scan_leftovers(test_app);
+            let traces = scan_leftovers(test_app, &[]);
             println!("Found {} leftover traces for PurgeCraft Test App", traces.len());
             for t in &traces {
                 println!("Trace: [{}] {}", t.trace_type, t.path);
             }
             assert!(traces.iter().any(|t| t.path.contains("PurgeCraftTestApp")), "Must find PurgeCraftTestApp leftovers");
         }
+    }
+
+    #[test]
+    fn test_leftover_filter_excludes_other_installed_apps() {
+        let make_app = |id: &str, name: &str, loc: &str, icon: &str, reg: &str| InstalledApp {
+            id: id.to_string(),
+            name: name.to_string(),
+            version: "".to_string(),
+            publisher: "".to_string(),
+            install_date: "".to_string(),
+            size_bytes: 0,
+            install_location: loc.to_string(),
+            uninstall_string: "".to_string(),
+            registry_path: reg.to_string(),
+            is_64bit: true,
+            is_system_component: false,
+            is_uwp: false,
+            package_full_name: "".to_string(),
+            display_icon: icon.to_string(),
+            is_new: false,
+            source_badge: "".to_string(),
+        };
+        let make_trace = |t_type: &str, path: &str| LeftoverTrace {
+            id: format!("t_{path}"),
+            app_id: "121a0be4".to_string(),
+            trace_type: t_type.to_string(),
+            path: path.to_string(),
+            size_bytes: 100,
+            confidence: 75,
+            selected: false,
+        };
+
+        let target = make_app(
+            "121a0be4-63bd-531e-acf8-fc3924c7e984",
+            "Antigravity 2.24.0",
+            "",
+            r"C:\Users\dimal\AppData\Local\Programs\antigravity\Antigravity.exe,0",
+            r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\121a0be4-63bd-531e-acf8-fc3924c7e984",
+        );
+        let other = make_app(
+            "{99999999-0000-0000-0000-000000000001}_is1",
+            "Antigravity IDE (User)",
+            r"C:\Users\dimal\AppData\Local\Programs\Antigravity IDE\",
+            r"C:\Users\dimal\AppData\Local\Programs\Antigravity IDE\Antigravity IDE.exe",
+            r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\{99999999-0000-0000-0000-000000000001}_is1",
+        );
+
+        let tid = build_app_identity(&target);
+        let others = build_other_app_identities(&tid, std::slice::from_ref(&other));
+
+        // Must exclude traces belonging to Antigravity IDE (User)
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Roaming\Antigravity IDE"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Antigravity IDE"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("file", r"C:\Users\dimal\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Antigravity IDE\Antigravity IDE.lnk"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Programs\Antigravity IDE"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Programs"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("registry_key", r"HKEY_CURRENT_USER\Software\Antigravity IDE"), &tid, &others));
+        assert!(belongs_to_other_installed_app(&make_trace("registry_key", r"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Uninstall\{99999999-0000-0000-0000-000000000001}_is1"), &tid, &others));
+
+        // Must keep target Antigravity 2.24.0's own traces
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Roaming\Antigravity"), &tid, &others));
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\antigravity-updater"), &tid, &others));
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Temp\antigravity-stable-user-x64"), &tid, &others));
+        assert!(!belongs_to_other_installed_app(&make_trace("file", r"C:\Users\dimal\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Antigravity.lnk"), &tid, &others));
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Programs\antigravity"), &tid, &others));
+        assert!(!belongs_to_other_installed_app(&make_trace("registry_key", r"HKEY_CURRENT_USER\Software\121a0be4-63bd-531e-acf8-fc3924c7e984"), &tid, &others));
+
+        // Reverse check: uninstalling Antigravity IDE must exclude Antigravity 2.24.0's traces
+        let reverse_tid = build_app_identity(&other);
+        let reverse_others = build_other_app_identities(&reverse_tid, std::slice::from_ref(&target));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Roaming\Antigravity"), &reverse_tid, &reverse_others));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Programs\antigravity"), &reverse_tid, &reverse_others));
+        assert!(belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\antigravity-updater"), &reverse_tid, &reverse_others));
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Roaming\Antigravity IDE"), &reverse_tid, &reverse_others));
+
+        // Duplicate entry pointing to identical install dir must not block target's own folder
+        let dup_other = make_app(
+            "dup_antigravity_x86",
+            "Antigravity Legacy",
+            r"C:\Users\dimal\AppData\Local\Programs\antigravity",
+            "",
+            "",
+        );
+        let dup_others = build_other_app_identities(&tid, &[dup_other]);
+        assert!(!belongs_to_other_installed_app(&make_trace("folder", r"C:\Users\dimal\AppData\Local\Programs\antigravity"), &tid, &dup_others));
+    }
+
+    #[test]
+    fn test_tracker_fs_baseline_prevents_existing_flood() {
+        let base = std::env::temp_dir().join("purgecraft_tracker_test_root");
+        let _ = std::fs::remove_dir_all(&base);
+        let pre_nested = base.join("a").join("b");
+        std::fs::create_dir_all(&pre_nested).unwrap();
+        std::fs::write(pre_nested.join("existing.txt"), b"ok").unwrap();
+
+        let mut seen = HashSet::new();
+        record_existing_fs(&base, &mut seen, 0, 2);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        scan_and_emit_fs(&base, &mut seen, &tx, "22:10:00", 0, 2);
+        assert!(rx.try_recv().is_err(), "Pre-existing files must not flood live log");
+
+        let new_file = pre_nested.join("new_install.dll");
+        std::fs::write(&new_file, b"dll").unwrap();
+        scan_and_emit_fs(&base, &mut seen, &tx, "22:10:01", 0, 2);
+        let msg = rx.try_recv().expect("Newly created file must be emitted");
+        assert!(msg.path.ends_with("new_install.dll"));
+        assert!(rx.try_recv().is_err());
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -3691,10 +4189,117 @@ Antigravity 2.19.1                                           Google.Antigravity 
         }
         win32.extend(uwp);
         println!("=== SORTED COMBINED (take 20) ===");
-        win32.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        win32.sort_by_key(|a| a.name.to_lowercase());
         for (i, a) in win32.iter().take(20).enumerate() {
             println!("  [{}] name='{}' (len={}), badge='{}'", i, a.name, a.name.len(), a.source_badge);
         }
+    }
+
+    #[test]
+    fn test_matches_app_token_and_safe_dir() {
+        assert!(matches_app_token("PurgeCraft", "PurgeCraft"));
+        assert!(matches_app_token("PurgeCraft_Data", "PurgeCraft"));
+        assert!(matches_app_token("PurgeCraft-Temp", "PurgeCraft"));
+        assert!(matches_app_token("My PurgeCraft App", "PurgeCraft"));
+        assert!(!matches_app_token("BarcodeGenerator", "Code"));
+        assert!(!matches_app_token("UncodeApp", "Code"));
+        assert!(!matches_app_token("MyGameStudio", "Game"));
+
+        assert!(!is_safe_app_dir(Path::new(r"C:\Windows")));
+        assert!(!is_safe_app_dir(Path::new(r"C:\Program Files")));
+        assert!(!is_safe_app_dir(Path::new(r"D:\Games")));
+        assert!(!is_safe_app_dir(Path::new(r"D:\SteamLibrary\steamapps\common")));
+        assert!(!is_safe_app_dir(Path::new(r"C:\")));
+        assert!(!is_safe_app_dir(Path::new(r"D:\")));
+
+        assert!(is_safe_app_dir(Path::new(r"D:\Games\MyCustomGame")));
+        assert!(is_safe_app_dir(Path::new(r"D:\SteamLibrary\steamapps\common\Unturned")));
+    }
+
+    #[test]
+    fn test_parse_reg_hive_and_sub_edge_cases() {
+        assert_eq!(
+            parse_reg_hive_and_sub(r"HKLM\SOFTWARE\TestApp"),
+            Some((HKEY_LOCAL_MACHINE, r"SOFTWARE\TestApp".to_string()))
+        );
+        assert_eq!(
+            parse_reg_hive_and_sub(r"  HKEY_CURRENT_USER\Software\MyApp  "),
+            Some((HKEY_CURRENT_USER, r"Software\MyApp".to_string()))
+        );
+        assert_eq!(
+            parse_reg_hive_and_sub(r"HKCC\System\CurrentControlSet"),
+            Some((HKEY_CURRENT_CONFIG, r"System\CurrentControlSet".to_string()))
+        );
+        assert_eq!(parse_reg_hive_and_sub("INVALID\\Path"), None);
+    }
+
+    #[test]
+    fn test_clean_uwp_package_name_edge_cases() {
+        assert_eq!(clean_uwp_package_name("Microsoft.WindowsCalculator"), "Microsoft WindowsCalculator");
+        assert_eq!(clean_uwp_package_name("22450.AppName.123"), "AppName 123");
+        assert_eq!(clean_uwp_package_name("SingleWord"), "SingleWord");
+    }
+
+    #[test]
+    fn test_delete_dir_contents_safe_preserves_target_and_cleans_dir() {
+        let base = std::env::temp_dir().join(format!("purgecraft_safe_del_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let sub = base.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(base.join("a.tmp"), b"12345").unwrap();
+        std::fs::write(sub.join("b.tmp"), b"67890").unwrap();
+
+        let mut files = 0;
+        let mut bytes = 0;
+        delete_dir_contents_safe(&base, &mut files, &mut bytes);
+        assert_eq!(files, 2);
+        assert_eq!(bytes, 10);
+        assert!(!base.join("a.tmp").exists());
+        assert!(!sub.exists());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn test_folder_prefix_matching_safety() {
+        let deleted_folders = [r"c:\program files\app\".to_string()];
+        let is_handled = |path: &str| {
+            let norm = path.to_lowercase().replace('/', "\\");
+            let norm_trimmed = norm.trim_end_matches('\\');
+            deleted_folders
+                .iter()
+                .any(|f| norm_trimmed == f.trim_end_matches('\\') || norm.starts_with(f))
+        };
+        assert!(is_handled(r"C:\Program Files\App"));
+        assert!(is_handled(r"C:\Program Files\App\"));
+        assert!(is_handled(r"C:\Program Files\App\data.bin"));
+        // Sibling folder starting with "App" must NOT be flagged as already handled
+        assert!(!is_handled(r"C:\Program Files\App2\data.bin"));
+        assert!(!is_handled(r"C:\Program Files\App_Extra"));
+    }
+
+    #[test]
+    fn test_process_match_isolates_sibling_install_dirs() {
+        let install_loc = r"c:\users\dimal\appdata\local\programs\antigravity";
+        let target_names = vec!["antigravity.exe".to_string(), "uninstall antigravity.exe".to_string()];
+        let app_token = "antigravity";
+
+        // Own executable inside `antigravity` directory MUST match
+        assert!(does_process_match_app(
+            install_loc,
+            &target_names,
+            app_token,
+            "antigravity.exe",
+            r"c:\users\dimal\appdata\local\programs\antigravity\antigravity.exe",
+        ));
+
+        // Sibling `Antigravity IDE.exe` inside `Antigravity IDE` directory MUST NOT match!
+        assert!(!does_process_match_app(
+            install_loc,
+            &target_names,
+            app_token,
+            "antigravity ide.exe",
+            r"c:\users\dimal\appdata\local\programs\antigravity ide\antigravity ide.exe",
+        ));
     }
 }
 
@@ -3783,10 +4388,11 @@ pub fn parse_reg_hive_and_sub(full: &str) -> Option<(winreg::HKEY, String)> {
         Some((HKEY_CLASSES_ROOT, rest.to_string()))
     } else if let Some(rest) = trimmed.strip_prefix("HKEY_USERS\\").or_else(|| trimmed.strip_prefix("HKU\\")) {
         Some((HKEY_USERS, rest.to_string()))
-    } else if let Some(rest) = trimmed.strip_prefix("HKEY_CURRENT_CONFIG\\").or_else(|| trimmed.strip_prefix("HKCC\\")) {
-        Some((HKEY_CURRENT_CONFIG, rest.to_string()))
     } else {
-        None
+        trimmed
+            .strip_prefix("HKEY_CURRENT_CONFIG\\")
+            .or_else(|| trimmed.strip_prefix("HKCC\\"))
+            .map(|rest| (HKEY_CURRENT_CONFIG, rest.to_string()))
     }
 }
 
@@ -3822,10 +4428,13 @@ pub fn delete_registry_key_by_path(path: &str) -> bool {
 pub fn spawn_scan_leftovers_stream(
     app: InstalledApp,
     traced_apps: Vec<TracedApp>,
+    other_apps: Vec<InstalledApp>,
 ) -> std::sync::mpsc::Receiver<ScanProgressMsg> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let targets = build_app_leftover_targets(&app, &traced_apps);
+        let target_id = build_app_identity(&app);
+        let other_ids = build_other_app_identities(&target_id, &other_apps);
         let mut found_traces = Vec::new();
         let total = targets.len().max(1);
         let mut last_ui_update = std::time::Instant::now();
@@ -3841,7 +4450,11 @@ pub fn spawn_scan_leftovers_stream(
                 last_ui_update = now;
             }
             if let Some(trace) = check_target_exists(t_type, p_str, &app, &mut found_traces) {
-                let _ = tx.send(ScanProgressMsg::TraceFound(trace));
+                if belongs_to_other_installed_app(&trace, &target_id, &other_ids) {
+                    found_traces.pop();
+                } else {
+                    let _ = tx.send(ScanProgressMsg::TraceFound(trace));
+                }
             }
         }
         let mut seen = HashSet::new();
@@ -3902,9 +4515,10 @@ pub fn spawn_delete_leftovers_stream(
         for (i, trace) in sorted_traces.iter().enumerate() {
             let progress = (i as f32) / (total as f32);
             let norm = trace.path.to_lowercase().replace('/', "\\");
+            let norm_trimmed = norm.trim_end_matches('\\');
 
             let already_handled = if trace.trace_type == "file" || trace.trace_type == "folder" {
-                deleted_folders.iter().any(|f| norm == *f || norm.starts_with(f))
+                deleted_folders.iter().any(|f| norm_trimmed == f.trim_end_matches('\\') || norm.starts_with(f))
             } else if trace.trace_type == "registry_key" {
                 let key_part = if let Some(idx) = norm.find(" -> ") {
                     norm[..idx].trim()

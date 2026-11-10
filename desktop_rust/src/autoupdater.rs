@@ -242,5 +242,8 @@ mod tests {
         assert!(!is_version_newer("1.0.1", "1.0.0"));
         assert!(!is_version_newer("1.0.0", "1.0.0"));
         assert!(!is_version_newer("1.2.0", "1.1.9"));
+        assert!(is_version_newer("1.0.2", "1.0.10"));
+        assert!(is_version_newer("1.0", "1.0.1"));
+        assert!(!is_version_newer("2.0.0", "v1.9.9"));
     }
 }

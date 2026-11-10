@@ -11,16 +11,21 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
     let lang = app.lang();
     let mut close_wizard = false;
+    let is_detached = app.detached_modals.contains("modal_wizard");
+    let closable = app.wizard_phase != WizardPhase::Deleting;
 
-    egui::Window::new(format!("{} {} — {}", crate::i18n::t(lang, "Удаление остатков", "Leftovers Removal"), app.wizard_app_title, crate::i18n::t(lang, "Мастер Удаления ™", "Removal Wizard ™")))
-        .id(egui::Id::new("wizard_traces_modal"))
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(620.0);
-            ui.set_height(420.0);
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_wizard",
+        format!("{} {} — {}", crate::i18n::t(lang, "Удаление остатков", "Leftovers Removal"), app.wizard_app_title, crate::i18n::t(lang, "Мастер Удаления ™", "Removal Wizard ™")),
+        None,
+        egui::vec2(620.0, 410.0),
+        egui::vec2(380.0, 250.0),
+        closable,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
 
             match app.wizard_phase {
                 WizardPhase::Scanning => {
@@ -96,45 +101,51 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     let fs_traces: Vec<_> = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").cloned().collect();
                     let reg_traces: Vec<_> = app.wizard_traces.iter().filter(|t| t.trace_type == "registry_key").cloned().collect();
 
-                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                        if app.wizard_traces.is_empty() {
-                            ui.label(crate::i18n::t(lang, "Оставшихся следов программы не обнаружено (чистая система).", "No leftover traces detected (clean system)."));
-                        } else {
-                            if !fs_traces.is_empty() {
-                                let fs_size: u64 = fs_traces.iter().map(|t| t.size_bytes).sum();
-                                ui.strong(format!("🗀 {} ({} {}, {})", crate::i18n::t(lang, "Файловая система", "File system"), fs_traces.len(), crate::i18n::t(lang, "элементов", "items"), format_size_lang(fs_size, lang)));
-                                for t in &mut app.wizard_traces {
-                                    if t.trace_type != "registry_key" {
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(14.0);
-                                            ui.checkbox(&mut t.selected, "");
-                                            let icon = if t.trace_type == "folder" { "📁" } else { "📄" };
-                                            ui.label(format!("{} {}", icon, t.path));
-                                        });
+                    let list_h = super::fill_scroll_height(ui, 44.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
+                        ui.scope(|ui| {
+                            ui.style_mut().interaction.selectable_labels = false;
+                            let render_trace_row = |ui: &mut egui::Ui, selected: &mut bool, text: String, raw_path: &str| {
+                                ui.horizontal(|ui| {
+                                    ui.add_space(14.0);
+                                    ui.checkbox(selected, "");
+                                    if ui.add(egui::Label::new(text).sense(egui::Sense::click()).truncate()).on_hover_text(raw_path).clicked() {
+                                        *selected = !*selected;
                                     }
-                                }
-                            }
+                                });
+                            };
 
-                            if !reg_traces.is_empty() {
-                                ui.add_space(6.0);
-                                ui.strong(format!("🗁 {} ({} {})", crate::i18n::t(lang, "Реестр", "Registry"), reg_traces.len(), crate::i18n::t(lang, "элементов", "items")));
-                                for t in &mut app.wizard_traces {
-                                    if t.trace_type == "registry_key" {
-                                        ui.horizontal(|ui| {
-                                            ui.add_space(14.0);
-                                            ui.checkbox(&mut t.selected, "");
-                                            ui.label(format!("🗄 {}", t.path));
-                                        });
+                            if app.wizard_traces.is_empty() {
+                                ui.label(crate::i18n::t(lang, "Оставшихся следов программы не обнаружено (чистая система).", "No leftover traces detected (clean system)."));
+                            } else {
+                                if !fs_traces.is_empty() {
+                                    let fs_size: u64 = fs_traces.iter().map(|t| t.size_bytes).sum();
+                                    ui.strong(format!("🗀 {} ({} {}, {})", crate::i18n::t(lang, "Файловая система", "File system"), fs_traces.len(), crate::i18n::t(lang, "элементов", "items"), format_size_lang(fs_size, lang)));
+                                    for t in &mut app.wizard_traces {
+                                        if t.trace_type != "registry_key" {
+                                            let icon = if t.trace_type == "folder" { "📁" } else { "📄" };
+                                            render_trace_row(ui, &mut t.selected, format!("{} {}", icon, t.path), &t.path);
+                                        }
+                                    }
+                                }
+
+                                if !reg_traces.is_empty() {
+                                    ui.add_space(6.0);
+                                    ui.strong(format!("🗁 {} ({} {})", crate::i18n::t(lang, "Реестр", "Registry"), reg_traces.len(), crate::i18n::t(lang, "элементов", "items")));
+                                    for t in &mut app.wizard_traces {
+                                        if t.trace_type == "registry_key" {
+                                            render_trace_row(ui, &mut t.selected, format!("🗄 {}", t.path), &t.path);
+                                        }
                                     }
                                 }
                             }
-                        }
+                        });
                     });
 
                     ui.separator();
 
                     // Bottom selection & summary row
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button(crate::i18n::t(lang, "Выбрать все", "Select All")).clicked() {
                             for t in &mut app.wizard_traces {
                                 t.selected = true;
@@ -145,21 +156,22 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 t.selected = false;
                             }
                         }
-
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let fs_count = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").count();
-                            let reg_count = app.wizard_traces.iter().filter(|t| t.trace_type == "registry_key").count();
-                            let fs_size: u64 = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").map(|t| t.size_bytes).sum();
-                            ui.label(RichText::new(format!(
-                                "{} {} ({}) {} {} {}",
-                                fs_count,
-                                crate::i18n::t(lang, "файлов/папок", "files/folders"),
-                                format_size_lang(fs_size, lang),
-                                crate::i18n::t(lang, "и", "and"),
-                                reg_count,
-                                crate::i18n::t(lang, "элементов реестра", "registry items")
-                            )).small());
-                        });
+                        let fs_count = app.wizard_traces.iter().filter(|t| t.trace_type != "registry_key").count();
+                        let reg_count = app.wizard_traces.iter().filter(|t| t.trace_type == "registry_key").count();
+                        let sel_fs_count = app.wizard_traces.iter().filter(|t| t.selected && t.trace_type != "registry_key").count();
+                        let sel_reg_count = app.wizard_traces.iter().filter(|t| t.selected && t.trace_type == "registry_key").count();
+                        let sel_fs_size: u64 = app.wizard_traces.iter().filter(|t| t.selected && t.trace_type != "registry_key").map(|t| t.size_bytes).sum();
+                        ui.label(RichText::new(format!(
+                            "{}: {}/{} {} ({}) • {}: {}/{}",
+                            crate::i18n::t(lang, "Выбрано", "Selected"),
+                            sel_fs_count,
+                            fs_count,
+                            crate::i18n::t(lang, "файлов", "files"),
+                            format_size_lang(sel_fs_size, lang),
+                            crate::i18n::t(lang, "реестр", "registry"),
+                            sel_reg_count,
+                            reg_count
+                        )).small());
                     });
                 }
                 WizardPhase::Deleting => {
@@ -187,7 +199,8 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.add_space(10.0);
 
                     // Scrollable list of deleted items in bright green with checkmarks
-                    egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 48.0, 80.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         for trace in app.wizard_traces.iter().filter(|t| t.selected) {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("✔").color(Color32::from_rgb(34, 197, 94)).strong());
@@ -196,7 +209,8 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                     "folder" => "📁",
                                     _ => "📄",
                                 };
-                                ui.label(RichText::new(format!("{} {}", icon, trace.path)).color(Color32::from_rgb(34, 197, 94)).size(11.0));
+                                ui.add(egui::Label::new(RichText::new(format!("{} {}", icon, trace.path)).color(Color32::from_rgb(34, 197, 94)).size(11.0)).truncate())
+                                    .on_hover_text(&trace.path);
                             });
                         }
                     });
@@ -218,16 +232,17 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     });
                 }
             }
-        });
+        },
+    );
 
     if close_wizard {
         app.wizard_open = false;
+    }
+    super::sync_detachable_state("modal_wizard", &mut app.detached_modals, &mut app.wizard_open, outcome);
+
+    if !app.wizard_open {
         if let Some(target) = app.wizard_target_app.take() {
-            let target_id = target.id.to_lowercase();
-            let target_name = target.name.to_lowercase();
-            app.recently_uninstalled.insert(target_id.clone());
-            app.recently_uninstalled.insert(target_name.clone());
-            app.apps.retain(|a| a.id.to_lowercase() != target_id && a.name.to_lowercase() != target_name);
+            app.remove_app_from_list(&target.id, &target.name);
         }
         app.wizard_app_title.clear();
         app.wizard_traces.clear();

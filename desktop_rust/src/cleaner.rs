@@ -705,12 +705,14 @@ pub fn expand_env_strings(input: &str) -> String {
     }
 
     let wide_src: Vec<u16> = OsStr::new(input).encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide_src` is null-terminated UTF-16; passing null destination with size 0 queries required length.
     let needed = unsafe { ExpandEnvironmentStringsW(wide_src.as_ptr(), std::ptr::null_mut(), 0) };
     if needed == 0 {
         return input.to_string();
     }
 
     let mut buf: Vec<u16> = vec![0; needed as usize];
+    // SAFETY: `buf` has exact capacity `needed` u16 elements returned by the first call.
     let copied = unsafe { ExpandEnvironmentStringsW(wide_src.as_ptr(), buf.as_mut_ptr(), needed) };
     if copied == 0 || copied > needed {
         return input.to_string();
@@ -738,8 +740,9 @@ pub fn resolve_mui_string(input: &str) -> String {
     }
 
     extern "system" {
-        fn LoadLibraryA(lpLibFileName: *const u8) -> *mut std::ffi::c_void;
-        fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const u8) -> *mut std::ffi::c_void;
+        fn LoadLibraryA(lpLibFileName: *const i8) -> *mut std::ffi::c_void;
+        fn FreeLibrary(hLibModule: *mut std::ffi::c_void) -> i32;
+        fn GetProcAddress(hModule: *mut std::ffi::c_void, lpProcName: *const i8) -> *mut std::ffi::c_void;
     }
 
     #[allow(non_snake_case)]
@@ -750,10 +753,13 @@ pub fn resolve_mui_string(input: &str) -> String {
         ppvReserved: *mut std::ffi::c_void,
     ) -> i32;
 
+    // SAFETY: Loads system `shlwapi.dll`, resolves `SHLoadIndirectString`, passes valid
+    // null-terminated UTF-16 input and a 512-char writable buffer, and frees the module handle.
     unsafe {
-        let shlwapi = LoadLibraryA(b"shlwapi.dll\0".as_ptr());
+        let shlwapi = LoadLibraryA(c"shlwapi.dll".as_ptr());
         if !shlwapi.is_null() {
-            let func_ptr = GetProcAddress(shlwapi, b"SHLoadIndirectString\0".as_ptr());
+            let func_ptr = GetProcAddress(shlwapi, c"SHLoadIndirectString".as_ptr());
+            let mut resolved_mui: Option<String> = None;
             if !func_ptr.is_null() {
                 let func: SHLoadIndirectStringFn = std::mem::transmute(func_ptr);
                 let wide_src: Vec<u16> = OsStr::new(trimmed).encode_wide().chain(std::iter::once(0)).collect();
@@ -765,9 +771,13 @@ pub fn resolve_mui_string(input: &str) -> String {
                     }
                     let res = OsString::from_wide(&buf).to_string_lossy().to_string();
                     if !res.trim().is_empty() {
-                        return res;
+                        resolved_mui = Some(res);
                     }
                 }
+            }
+            FreeLibrary(shlwapi);
+            if let Some(res) = resolved_mui {
+                return res;
             }
         }
     }
@@ -809,17 +819,16 @@ pub fn extract_binary_path_from_image_path(raw: &str) -> Option<String> {
 
     let sys_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
     let resolved_str;
-    if s.to_lowercase().starts_with(r"\systemroot\") {
+    if s.len() >= 12 && s.as_bytes()[..12].eq_ignore_ascii_case(br"\systemroot\") {
         resolved_str = format!("{}{}", sys_root, &s[11..]);
         s = &resolved_str;
-    } else if s.to_lowercase().starts_with(r"system32\") {
+    } else if s.len() >= 9 && s.as_bytes()[..9].eq_ignore_ascii_case(br"system32\") {
         resolved_str = format!(r"{}\{}", sys_root, s);
         s = &resolved_str;
     }
 
     // If starts with quote: "C:\path to\app.exe" /arg
-    if s.starts_with('"') {
-        let rest = &s[1..];
+    if let Some(rest) = s.strip_prefix('"') {
         if let Some(end_quote) = rest.find('"') {
             let path = &rest[..end_quote];
             return Some(path.to_string());
@@ -831,11 +840,10 @@ pub fn extract_binary_path_from_image_path(raw: &str) -> Option<String> {
         return Some(s.to_string());
     }
 
-    // Try splitting at common argument separators
+    // Try splitting at common argument separators without `.to_lowercase()` slice hazards
     for ext in [".exe ", ".sys ", ".dll "] {
-        if let Some(idx) = s.to_lowercase().find(ext) {
-            let path = &s[..idx + 4];
-            return Some(path.to_string());
+        if let Some(prefix) = crate::types::slice_through_ascii_ignore_case(s, ext) {
+            return Some(prefix.trim_end().to_string());
         }
     }
 
@@ -959,7 +967,7 @@ pub fn scan_windows_services() -> Vec<ServiceItem> {
 
 #[cfg(windows)]
 #[repr(C)]
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::upper_case_acronyms)]
 struct SHELLEXECUTEINFOW {
     cbSize: u32,
     fMask: u32,
@@ -1007,29 +1015,33 @@ pub fn decode_console_output(bytes: &[u8]) -> String {
         }
     }
     // Decode from OEM code page (CP866 on RU Windows)
-    unsafe {
-        let len = MultiByteToWideChar(
-            1, // CP_OEMCP
-            0,
-            bytes.as_ptr(),
-            bytes.len() as i32,
-            std::ptr::null_mut(),
-            0,
-        );
-        if len > 0 {
-            let mut wide = vec![0u16; len as usize];
-            let res = MultiByteToWideChar(
+    if let Ok(byte_len) = i32::try_from(bytes.len()) {
+        // SAFETY: `bytes` is a valid non-empty slice of `byte_len` bytes, and `wide` is
+        // pre-allocated to the exact capacity returned by the sizing call.
+        unsafe {
+            let len = MultiByteToWideChar(
                 1, // CP_OEMCP
                 0,
                 bytes.as_ptr(),
-                bytes.len() as i32,
-                wide.as_mut_ptr(),
-                len,
+                byte_len,
+                std::ptr::null_mut(),
+                0,
             );
-            if res > 0 {
-                let decoded = String::from_utf16_lossy(&wide).trim().to_string();
-                if !decoded.is_empty() {
-                    return decoded;
+            if len > 0 {
+                let mut wide = vec![0u16; len as usize];
+                let res = MultiByteToWideChar(
+                    1, // CP_OEMCP
+                    0,
+                    bytes.as_ptr(),
+                    byte_len,
+                    wide.as_mut_ptr(),
+                    len,
+                );
+                if res > 0 {
+                    let decoded = String::from_utf16_lossy(&wide).trim().to_string();
+                    if !decoded.is_empty() {
+                        return decoded;
+                    }
                 }
             }
         }
@@ -1040,6 +1052,13 @@ pub fn decode_console_output(bytes: &[u8]) -> String {
 #[cfg(not(windows))]
 pub fn decode_console_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim().to_string()
+}
+
+/// Validates a Windows service key name against shell metacharacters before elevated `cmd.exe` invocation.
+pub fn is_valid_service_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 256
+        && !name.chars().any(|c| matches!(c, '"' | '\'' | '&' | '|' | ';' | '>' | '<' | '^' | '\\' | '/' | '\r' | '\n' | '\0'))
 }
 
 #[cfg(windows)]
@@ -1081,9 +1100,12 @@ pub fn run_elevated_cmd(cmd_args: &str) -> Result<(), String> {
         hProcess: std::ptr::null_mut(),
     };
 
+    // SAFETY: All `wide` string pointers live for the duration of `ShellExecuteExW`,
+    // `cbSize` matches `SHELLEXECUTEINFOW`, and `hProcess` is waited on and closed if non-null.
     let ok = unsafe { ShellExecuteExW(&mut info) };
     if ok != 0 {
         if !info.hProcess.is_null() {
+            // SAFETY: `info.hProcess` is a valid process handle returned by `ShellExecuteExW` with `SEE_MASK_NOCLOSEPROCESS`.
             unsafe {
                 WaitForSingleObject(info.hProcess, 15_000);
                 CloseHandle(info.hProcess);
@@ -1091,6 +1113,7 @@ pub fn run_elevated_cmd(cmd_args: &str) -> Result<(), String> {
         }
         Ok(())
     } else {
+        // SAFETY: `GetLastError` reads thread-local Win32 error code immediately after failed API call.
         let err = unsafe { GetLastError() };
         if err == 1223 {
             Err("Запрос прав Администратора (UAC) был отклонен пользователем.".to_string())
@@ -1100,22 +1123,43 @@ pub fn run_elevated_cmd(cmd_args: &str) -> Result<(), String> {
     }
 }
 
+fn decode_sc_error(output: &std::io::Result<std::process::Output>, fallback: &str) -> String {
+    if let Ok(out) = output {
+        let out_str = decode_console_output(&out.stdout);
+        if !out_str.is_empty() {
+            return out_str;
+        }
+        let err_str = decode_console_output(&out.stderr);
+        if !err_str.is_empty() {
+            return err_str;
+        }
+        fallback.to_string()
+    } else {
+        "Не удалось запустить sc.exe".to_string()
+    }
+}
+
 pub fn set_service_startup(service_name: &str, startup: &str) -> Result<(), String> {
+    if !is_valid_service_name(service_name) {
+        return Err("Недопустимое имя службы".to_string());
+    }
+    if !matches!(startup, "auto" | "demand" | "disabled") {
+        return Err("Недопустимый тип запуска службы".to_string());
+    }
     #[cfg(windows)]
     {
         // 1. Direct Registry Start DWORD attempt: 2=Auto, 3=Manual, 4=Disabled
-        let start_val: Option<u32> = match startup {
-            "auto" => Some(2),
-            "demand" => Some(3),
-            "disabled" => Some(4),
-            _ => None,
+        let start_val: u32 = match startup {
+            "auto" => 2,
+            "demand" => 3,
+            "disabled" => 4,
+            _ => unreachable!(),
         };
-        if let Some(val) = start_val {
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(svc_key) = hklm.open_subkey_with_flags(&format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name), KEY_SET_VALUE) {
-                if svc_key.set_value("Start", &val).is_ok() {
-                    return Ok(());
-                }
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let svc_reg_path = format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name);
+        if let Ok(svc_key) = hklm.open_subkey_with_flags(&svc_reg_path, KEY_SET_VALUE) {
+            if svc_key.set_value("Start", &start_val).is_ok() {
+                return Ok(());
             }
         }
 
@@ -1133,25 +1177,20 @@ pub fn set_service_startup(service_name: &str, startup: &str) -> Result<(), Stri
 
         // 3. Elevated execution via native ShellExecuteExW (UAC prompt)
         let elev_cmd = format!(r#"sc.exe config "{}" start= {}"#, service_name, startup);
-        if let Ok(_) = run_elevated_cmd(&elev_cmd) {
-            return Ok(());
+        match run_elevated_cmd(&elev_cmd) {
+            Ok(()) => {
+                if let Ok(svc_key) = hklm.open_subkey(&svc_reg_path) {
+                    if svc_key.get_value::<u32, _>("Start").ok() == Some(start_val) {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(uac_err) => {
+                return Err(uac_err);
+            }
         }
 
-        let err_msg = if let Ok(out) = output {
-            let out_str = decode_console_output(&out.stdout);
-            let err_str = decode_console_output(&out.stderr);
-            if !out_str.is_empty() {
-                out_str
-            } else if !err_str.is_empty() {
-                err_str
-            } else {
-                "Отказано в доступе. Требуются права Администратора.".to_string()
-            }
-        } else {
-            "Не удалось запустить sc.exe".to_string()
-        };
-
-        Err(err_msg)
+        Err(decode_sc_error(&output, "Отказано в доступе. Требуются права Администратора."))
     }
     #[cfg(not(windows))]
     {
@@ -1161,6 +1200,9 @@ pub fn set_service_startup(service_name: &str, startup: &str) -> Result<(), Stri
 }
 
 pub fn delete_windows_service(service_name: &str) -> Result<(), String> {
+    if !is_valid_service_name(service_name) {
+        return Err("Недопустимое имя службы".to_string());
+    }
     #[cfg(windows)]
     {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
@@ -1197,7 +1239,7 @@ pub fn delete_windows_service(service_name: &str) -> Result<(), String> {
         match run_elevated_cmd(&elev_cmd) {
             Ok(_) => {
                 std::thread::sleep(std::time::Duration::from_millis(300));
-                if hklm.open_subkey(&format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name)).is_err() {
+                if hklm.open_subkey(format!(r"SYSTEM\CurrentControlSet\Services\{}", service_name)).is_err() {
                     return Ok(());
                 }
             }
@@ -1206,22 +1248,7 @@ pub fn delete_windows_service(service_name: &str) -> Result<(), String> {
             }
         }
 
-        // If still failed, decode error cleanly from sc.exe with OEM CP
-        let err_msg = if let Ok(out) = output {
-            let out_str = decode_console_output(&out.stdout);
-            let err_str = decode_console_output(&out.stderr);
-            if !out_str.is_empty() {
-                out_str
-            } else if !err_str.is_empty() {
-                err_str
-            } else {
-                "Отказано в доступе (ошибка 5). Требуются права Администратора.".to_string()
-            }
-        } else {
-            "Не удалось запустить sc.exe".to_string()
-        };
-
-        Err(err_msg)
+        Err(decode_sc_error(&output, "Отказано в доступе (ошибка 5). Требуются права Администратора."))
     }
     #[cfg(not(windows))]
     {
@@ -1273,5 +1300,31 @@ mod tests {
     fn test_scan_windows_services_runs_without_panic() {
         let services = scan_windows_services();
         assert!(!services.is_empty(), "Should discover installed Windows services");
+    }
+
+    #[test]
+    fn test_is_valid_service_name_rejects_injection() {
+        assert!(is_valid_service_name("wuauserv"));
+        assert!(is_valid_service_name("My Service 1.0"));
+        assert!(!is_valid_service_name(""));
+        assert!(!is_valid_service_name("bad & calc.exe"));
+        assert!(!is_valid_service_name("bad\"svc"));
+        assert!(!is_valid_service_name("bad|dir"));
+        assert!(!is_valid_service_name("bad\\svc"));
+    }
+
+    #[test]
+    fn test_extract_binary_path_unicode_and_sys() {
+        let raw = r"\SystemRoot\System32\drivers\İTestDriver.SYS -arg";
+        let extracted = extract_binary_path_from_image_path(raw).unwrap();
+        assert!(extracted.ends_with("İTestDriver.SYS"));
+    }
+
+    #[test]
+    fn test_decode_console_output_cp866_and_utf8() {
+        assert_eq!(decode_console_output("Успешно".as_bytes()), "Успешно");
+        assert_eq!(decode_console_output(b""), "");
+        // CP866 bytes for "Да" (0x84, 0xA0)
+        assert_eq!(decode_console_output(&[0x84, 0xA0]), "Да");
     }
 }

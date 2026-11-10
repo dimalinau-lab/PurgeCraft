@@ -1,4 +1,4 @@
-#![allow(dead_code, non_snake_case)]
+#![allow(dead_code, non_snake_case, clippy::upper_case_acronyms)]
 
 use std::path::Path;
 use eframe::egui::ColorImage;
@@ -87,27 +87,29 @@ extern "system" {
     fn DeleteDC(hdc: isize) -> i32;
 }
 
+/// Parses `"C:\Path\App.exe,0"` or `"\"C:\Path\App.exe\""` into `(file_path, icon_index)`.
+pub fn parse_icon_location(icon_raw_path: &str) -> (&str, i32) {
+    let clean = icon_raw_path.trim().trim_matches('"');
+    if let Some(idx_pos) = clean.rfind(',') {
+        let (f, idx_str) = clean.split_at(idx_pos);
+        let trimmed_f = f.trim().trim_matches('"');
+        let idx_part = idx_str[1..].trim().trim_matches('"');
+        if let Ok(idx) = idx_part.parse::<i32>() {
+            return (trimmed_f, idx);
+        }
+        if Path::new(trimmed_f).exists() {
+            return (trimmed_f, 0);
+        }
+    }
+    (clean, 0)
+}
+
 pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
     if icon_raw_path.is_empty() {
         return None;
     }
 
-    // Clean path from index or quotes, e.g. "C:\Path\App.exe,0" or "\"C:\Path\App.exe\""
-    let clean = icon_raw_path.trim().trim_matches('"');
-    let (file_path, icon_index) = if let Some(idx_pos) = clean.rfind(',') {
-        let (f, idx_str) = clean.split_at(idx_pos);
-        let trimmed_f = f.trim().trim_matches('"');
-        let idx = idx_str[1..].trim().trim_matches('"').parse::<i32>().unwrap_or(0);
-        if Path::new(trimmed_f).exists() {
-            (trimmed_f, idx)
-        } else if Path::new(clean).exists() {
-            (clean, 0)
-        } else {
-            (trimmed_f, idx)
-        }
-    } else {
-        (clean, 0)
-    };
+    let (file_path, icon_index) = parse_icon_location(icon_raw_path);
 
     if !Path::new(file_path).exists() {
         return None;
@@ -116,6 +118,9 @@ pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
     let wide_path: Vec<u16> = file_path.encode_utf16().chain(std::iter::once(0)).collect();
     let mut chosen_hicon: isize = 0;
 
+    // SAFETY: All Win32 pointers point to live stack/Vec buffers with matching sizes,
+    // `SHFILEINFOW`/`ICONINFO`/`BITMAPINFO` are C POD structs valid when zero-initialized,
+    // and every acquired HICON, HBITMAP, and HDC handle is explicitly destroyed before returning.
     unsafe {
         let mut hicon_large: isize = 0;
         let mut hicon_small: isize = 0;
@@ -163,6 +168,26 @@ pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
             return None;
         }
 
+        let cleanup_icon_resources = |info: &ICONINFO, hicon: isize| {
+            if info.hbmColor != 0 {
+                DeleteObject(info.hbmColor);
+            }
+            if info.hbmMask != 0 {
+                DeleteObject(info.hbmMask);
+            }
+            DestroyIcon(hicon);
+        };
+
+        let hbm_to_read = if icon_info.hbmColor != 0 { icon_info.hbmColor } else { icon_info.hbmMask };
+        let hdc = CreateCompatibleDC(0);
+        if hdc == 0 || hbm_to_read == 0 {
+            if hdc != 0 {
+                DeleteDC(hdc);
+            }
+            cleanup_icon_resources(&icon_info, chosen_hicon);
+            return None;
+        }
+
         let width = 32usize;
         let height = 32usize;
         let mut pixels = vec![0u8; width * height * 4];
@@ -175,8 +200,6 @@ pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
         bmi.bmiHeader.biBitCount = 32;
         bmi.bmiHeader.biCompression = 0; // BI_RGB
 
-        let hdc = CreateCompatibleDC(0);
-        let hbm_to_read = if icon_info.hbmColor != 0 { icon_info.hbmColor } else { icon_info.hbmMask };
         let lines = GetDIBits(
             hdc,
             hbm_to_read,
@@ -188,24 +211,16 @@ pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
         );
 
         DeleteDC(hdc);
-        if icon_info.hbmColor != 0 {
-            DeleteObject(icon_info.hbmColor);
-        }
-        if icon_info.hbmMask != 0 {
-            DeleteObject(icon_info.hbmMask);
-        }
-        DestroyIcon(chosen_hicon);
+        cleanup_icon_resources(&icon_info, chosen_hicon);
 
         if lines == 0 {
             return None;
         }
 
         // Convert BGRA to RGBA
-        for chunk in pixels.chunks_exact_mut(4) {
-            let b = chunk[0];
-            let r = chunk[2];
-            chunk[0] = r;
-            chunk[2] = b;
+        let (chunks, _) = pixels.as_chunks_mut::<4>();
+        for chunk in chunks {
+            chunk.swap(0, 2);
             // If alpha is 0 on a non-black pixel, fix alpha
             if chunk[3] == 0 && (chunk[0] > 0 || chunk[1] > 0 || chunk[2] > 0) {
                 chunk[3] = 255;
@@ -213,5 +228,23 @@ pub fn extract_app_icon(icon_raw_path: &str) -> Option<ColorImage> {
         }
 
         Some(ColorImage::from_rgba_unmultiplied([width, height], &pixels))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_icon_location_formats() {
+        assert_eq!(parse_icon_location(r#""C:\Program Files\App\app.exe",0"#), (r#"C:\Program Files\App\app.exe"#, 0));
+        assert_eq!(parse_icon_location(r#"C:\App\app.exe, -101"#), (r#"C:\App\app.exe"#, -101));
+        assert_eq!(parse_icon_location(r#""C:\Path, With Comma\app.exe""#), (r#"C:\Path, With Comma\app.exe"#, 0));
+    }
+
+    #[test]
+    fn test_extract_app_icon_missing_or_empty() {
+        assert!(extract_app_icon("").is_none());
+        assert!(extract_app_icon(r"C:\non_existent_purgecraft_test_12345.exe,0").is_none());
     }
 }

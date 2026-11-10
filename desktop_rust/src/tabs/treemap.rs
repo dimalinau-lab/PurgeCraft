@@ -10,7 +10,7 @@ pub fn render_disk_treemap(app: &mut PurgeCraftApp, ui: &mut egui::Ui, filtered_
         .filter(|&(_, sz)| sz > 0)
         .collect();
 
-    sized_apps.sort_by(|a, b| b.1.cmp(&a.1));
+    sized_apps.sort_by_key(|a| std::cmp::Reverse(a.1));
 
     let total_bytes: u64 = sized_apps.iter().map(|(_, sz)| sz).sum();
     let max_bytes: u64 = sized_apps.first().map(|(_, sz)| *sz).unwrap_or(1);
@@ -89,7 +89,7 @@ pub fn render_disk_treemap(app: &mut PurgeCraftApp, ui: &mut egui::Ui, filtered_
         let cols = if avail_w > 900.0 { 3 } else if avail_w > 550.0 { 2 } else { 1 };
         let card_w = (avail_w - (cols as f32 - 1.0) * 10.0) / cols as f32;
 
-        let rows = (sized_apps.len() + cols - 1) / cols;
+        let rows = sized_apps.len().div_ceil(cols);
 
         for r in 0..rows {
             ui.horizontal(|ui| {

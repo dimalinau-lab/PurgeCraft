@@ -2,91 +2,13 @@ use eframe::egui::{self, Color32, RichText, Vec2, Stroke};
 use egui_extras::{TableBuilder, Column};
 use crate::app::PurgeCraftApp;
 use crate::icons;
-use crate::scanner::{self, InstalledApp, save_known_apps};
-use crate::types::{AppCategory, SortColumn, SortOrder, format_size_lang, truncate_chars, jump_to_regedit, open_system_folder, UninstallerViewMode};
+use crate::scanner::{InstalledApp, save_known_apps};
+use crate::types::{SortColumn, SortOrder, format_size_lang, truncate_chars, jump_to_regedit, open_system_folder, UninstallerViewMode};
 use crate::ui::render_sort_header;
 
 pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
     let lang = app.lang();
-    let q = app.search_query.to_lowercase();
-    let cat = app.category;
-
-    let mut filtered_indices: Vec<usize> = app.apps
-        .iter()
-        .enumerate()
-        .filter(|(_, a)| {
-            // Category filter
-            let cat_match = match cat {
-                AppCategory::All => true,
-                AppCategory::UserApps => !a.is_system_component && !a.is_uwp && a.source_badge != "[Portable]",
-                AppCategory::System => a.is_system_component,
-                AppCategory::StoreApps => a.is_uwp,
-                AppCategory::Portable => a.source_badge == "[Portable]",
-                AppCategory::Arch64 => a.is_64bit,
-                AppCategory::Arch32 => !a.is_64bit,
-            };
-            if !cat_match {
-                return false;
-            }
-
-            // Drive filter
-            if let Some(target_drive) = app.drive_filter {
-                if scanner::get_app_drive_letter(a) != target_drive {
-                    return false;
-                }
-            }
-
-            if app.settings.tree_updates_mode == "hidden" {
-                let is_update = a.name.starts_with("KB")
-                    || a.name.to_lowercase().contains("hotfix")
-                    || a.name.to_lowercase().contains("update for")
-                    || a.name.to_lowercase().contains("обновление для");
-                if is_update {
-                    return false;
-                }
-            }
-
-            // Search query filter
-            if q.is_empty() {
-                true
-            } else {
-                a.name.to_lowercase().contains(&q) 
-                    || a.publisher.to_lowercase().contains(&q)
-                    || a.source_badge.to_lowercase().contains(&q)
-            }
-        })
-        .map(|(i, _)| i)
-        .collect();
-
-    // Sort according to current sort column and direction
-    let sort_col = app.sort_column;
-    let sort_ord = app.sort_order;
-    let highlight_recent = app.settings.highlight_recent;
-    filtered_indices.sort_by(|&a_idx, &b_idx| {
-        let a = &app.apps[a_idx];
-        let b = &app.apps[b_idx];
-
-        if highlight_recent && a.is_new != b.is_new {
-            return if a.is_new { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
-        }
-
-        let cmp = match sort_col {
-            SortColumn::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
-            SortColumn::Date => a.install_date.cmp(&b.install_date),
-            SortColumn::Publisher => a.publisher.to_lowercase().cmp(&b.publisher.to_lowercase()),
-            SortColumn::AppType => {
-                let a_type = if a.is_uwp { 2 } else if a.is_64bit { 1 } else { 0 };
-                let b_type = if b.is_uwp { 2 } else if b.is_64bit { 1 } else { 0 };
-                a_type.cmp(&b_type)
-            }
-        };
-        if sort_ord == SortOrder::Descending {
-            cmp.reverse()
-        } else {
-            cmp
-        }
-    });
+    let filtered_indices = app.ensure_filtered_indices();
 
     let selected_app = app.selected_app_idx.and_then(|idx| app.apps.get(idx).cloned());
 
@@ -251,12 +173,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     let f = a_item.display_icon.split(',').next().unwrap_or(&a_item.display_icon).trim().trim_matches('"');
                     std::path::Path::new(f).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
                 } else if !a_item.uninstall_string.is_empty() {
-                    let clean = a_item.uninstall_string.trim().trim_matches('"');
-                    let exe_candidate = if let Some(pos) = clean.to_lowercase().find(".exe") {
-                        &clean[..pos + 4]
-                    } else {
-                        clean
-                    };
+                    let exe_candidate = crate::types::extract_exe_prefix(&a_item.uninstall_string);
                     std::path::Path::new(exe_candidate).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
                 } else {
                     String::new()
@@ -375,21 +292,20 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     app.remove_entry_confirm_app = Some(a_item.clone());
                     app.remove_entry_confirm_open = true;
                 }
-                if ui.link(crate::i18n::sidebar_open_folder(lang)).clicked() {
-                    if !loc.is_empty() {
-                        let p = std::path::Path::new(&loc);
-                        let target = if p.is_file() {
-                            p.parent().unwrap_or(p)
-                        } else {
-                            p
-                        };
-                        let _ = open::that(target);
-                    }
+                if ui.link(crate::i18n::sidebar_open_folder(lang)).clicked() && !loc.is_empty() {
+                    let p = std::path::Path::new(&loc);
+                    let target = if p.is_file() {
+                        p.parent().unwrap_or(p)
+                    } else {
+                        p
+                    };
+                    let _ = open::that(target);
                 }
-                if !a_item.is_uwp && !a_item.registry_path.is_empty() {
-                    if ui.link(crate::i18n::sidebar_open_reg(lang)).clicked() {
-                        jump_to_regedit(&a_item.registry_path);
-                    }
+                if !a_item.is_uwp
+                    && !a_item.registry_path.is_empty()
+                    && ui.link(crate::i18n::sidebar_open_reg(lang)).clicked()
+                {
+                    jump_to_regedit(&a_item.registry_path);
                 }
                 if ui.link(crate::i18n::sidebar_search_google(lang)).clicked() {
                     let url = format!("https://www.google.com/search?q={}+{}", a_item.name, a_item.publisher);
@@ -428,17 +344,22 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 let all_filtered_selected = !filtered_indices.is_empty()
                     && filtered_indices.iter().all(|&i| app.batch_selected.contains(&app.apps[i].id));
 
-                TableBuilder::new(ui)
-                    .striped(true)
-                    .resizable(true)
-                    .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                    .column(Column::exact(32.0))                    // Batch Checkbox Column
-                    .column(Column::initial(260.0).at_least(140.0)) // Program Name (Resizable!)
-                    .column(Column::exact(85.0))                    // Size
-                    .column(Column::exact(95.0))                    // Date
-                    .column(Column::initial(150.0).at_least(80.0))  // Publisher (Resizable!)
-                    .column(Column::remainder().at_least(85.0))     // Type / Arch
-                    .header(30.0, |mut header| {
+                ui.scope(|ui| {
+                    // Prevent labels inside table cells from showing I-beam cursors or stealing row clicks
+                    ui.style_mut().interaction.selectable_labels = false;
+
+                    TableBuilder::new(ui)
+                        .striped(true)
+                        .resizable(true)
+                        .sense(egui::Sense::click())
+                        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                        .column(Column::exact(32.0))                                 // Batch Checkbox Column
+                        .column(Column::initial(260.0).at_least(140.0).clip(true)) // Program Name (Resizable!)
+                        .column(Column::exact(85.0).clip(true))                      // Size
+                        .column(Column::exact(95.0).clip(true))                      // Date
+                        .column(Column::initial(150.0).at_least(80.0).clip(true))  // Publisher (Resizable!)
+                        .column(Column::remainder().at_least(85.0).clip(true))       // Type / Arch
+                        .header(30.0, |mut header| {
                         // Column 0: Checkbox Header
                         header.col(|ui| {
                             let mut master_chk = all_filtered_selected;
@@ -574,17 +495,19 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     ui.close_menu();
                                 }
                                 ui.separator();
-                                if !target_app.install_location.is_empty() && std::path::Path::new(&target_app.install_location).exists() {
-                                    if ui.button(crate::i18n::sidebar_open_folder(lang)).clicked() {
-                                        open_system_folder(&target_app.install_location, app.settings.use_total_commander);
-                                        ui.close_menu();
-                                    }
+                                if !target_app.install_location.is_empty()
+                                    && std::path::Path::new(&target_app.install_location).exists()
+                                    && ui.button(crate::i18n::sidebar_open_folder(lang)).clicked()
+                                {
+                                    open_system_folder(&target_app.install_location, app.settings.use_total_commander);
+                                    ui.close_menu();
                                 }
-                                if !target_app.is_uwp && !target_app.registry_path.is_empty() {
-                                    if ui.button(crate::i18n::sidebar_open_reg(lang)).clicked() {
-                                        jump_to_regedit(&target_app.registry_path);
-                                        ui.close_menu();
-                                    }
+                                if !target_app.is_uwp
+                                    && !target_app.registry_path.is_empty()
+                                    && ui.button(crate::i18n::sidebar_open_reg(lang)).clicked()
+                                {
+                                    jump_to_regedit(&target_app.registry_path);
+                                    ui.close_menu();
                                 }
                                 if ui.button(crate::i18n::t(lang, "🌐 Искать в Google", "🌐 Search Google")).clicked() {
                                     let url = format!("https://www.google.com/search?q={}+{}", target_app.name, target_app.publisher);
@@ -598,17 +521,15 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                         ui.close_menu();
                                     }
                                 }
-                                if app.new_apps_count > 0 {
-                                    if ui.button(crate::i18n::t(lang, "✨ Сбросить все отметки «Новое»", "✨ Dismiss all \"New\" marks")).clicked() {
-                                        *dismiss_all = true;
-                                        ui.close_menu();
-                                    }
+                                if app.new_apps_count > 0
+                                    && ui.button(crate::i18n::t(lang, "✨ Сбросить все отметки «Новое»", "✨ Dismiss all \"New\" marks")).clicked()
+                                {
+                                    *dismiss_all = true;
+                                    ui.close_menu();
                                 }
                             };
 
-                            // Column 1: Name with REAL 24x24 ICON & CONTEXT MENU
-                            let _ = row.col(|ui| {
-                                let cell_resp = ui.interact(ui.max_rect(), ui.id().with(1), egui::Sense::click());
+                            let mut handle_cell = |cell_resp: egui::Response| {
                                 if cell_resp.clicked() {
                                     app_to_select = Some(idx);
                                 }
@@ -618,7 +539,10 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                 cell_resp.context_menu(|ui| {
                                     show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
                                 });
+                            };
 
+                            // Column 1: Name with REAL 24x24 ICON & CONTEXT MENU
+                            let (_, resp1) = row.col(|ui| {
                                 ui.horizontal(|ui| {
                                     // Render real icon if available, or load on demand
                                     if !item_app.display_icon.is_empty() {
@@ -697,69 +621,33 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     ui.add(label_widget);
                                 });
                             });
+                            handle_cell(resp1);
 
                             // Column 2: Size - CLICKABLE ANYWHERE + CONTEXT MENU
-                            let _ = row.col(|ui| {
-                                let cell_resp = ui.interact(ui.max_rect(), ui.id().with(2), egui::Sense::click());
-                                if cell_resp.clicked() {
-                                    app_to_select = Some(idx);
-                                }
-                                if cell_resp.double_clicked() {
-                                    app_to_uninstall = Some(item_app.clone());
-                                }
-                                cell_resp.context_menu(|ui| {
-                                    show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
-                                });
+                            let (_, resp2) = row.col(|ui| {
                                 let sz_color = if is_selected { Color32::WHITE } else if app.dark_mode { Color32::from_rgb(212, 212, 216) } else { Color32::from_rgb(51, 65, 85) };
                                 ui.label(RichText::new(format_size_lang(item_app.size_bytes, lang)).color(sz_color));
                             });
+                            handle_cell(resp2);
 
                             // Column 3: Date - CLICKABLE ANYWHERE + CONTEXT MENU
-                            let _ = row.col(|ui| {
-                                let cell_resp = ui.interact(ui.max_rect(), ui.id().with(3), egui::Sense::click());
-                                if cell_resp.clicked() {
-                                    app_to_select = Some(idx);
-                                }
-                                if cell_resp.double_clicked() {
-                                    app_to_uninstall = Some(item_app.clone());
-                                }
-                                cell_resp.context_menu(|ui| {
-                                    show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
-                                });
+                            let (_, resp3) = row.col(|ui| {
                                 let dt_color = if is_selected { Color32::WHITE } else if app.dark_mode { Color32::from_rgb(161, 161, 170) } else { Color32::from_rgb(100, 116, 139) };
                                 let date_str = if item_app.install_date.is_empty() { "—" } else { &item_app.install_date };
                                 ui.label(RichText::new(date_str).color(dt_color));
                             });
+                            handle_cell(resp3);
 
                             // Column 4: Publisher - CLICKABLE ANYWHERE + CONTEXT MENU
-                            let _ = row.col(|ui| {
-                                let cell_resp = ui.interact(ui.max_rect(), ui.id().with(4), egui::Sense::click());
-                                if cell_resp.clicked() {
-                                    app_to_select = Some(idx);
-                                }
-                                if cell_resp.double_clicked() {
-                                    app_to_uninstall = Some(item_app.clone());
-                                }
-                                cell_resp.context_menu(|ui| {
-                                    show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
-                                });
+                            let (_, resp4) = row.col(|ui| {
                                 let pub_color = if is_selected { Color32::WHITE } else if app.dark_mode { Color32::from_rgb(161, 161, 170) } else { Color32::from_rgb(100, 116, 139) };
                                 let pub_str = truncate_chars(if item_app.publisher.is_empty() { "—" } else { &item_app.publisher }, 26);
                                 ui.label(RichText::new(pub_str).color(pub_color));
                             });
+                            handle_cell(resp4);
 
                             // Column 5: Type - CLICKABLE ANYWHERE + CONTEXT MENU
-                            let _ = row.col(|ui| {
-                                let cell_resp = ui.interact(ui.max_rect(), ui.id().with(5), egui::Sense::click());
-                                if cell_resp.clicked() {
-                                    app_to_select = Some(idx);
-                                }
-                                if cell_resp.double_clicked() {
-                                    app_to_uninstall = Some(item_app.clone());
-                                }
-                                cell_resp.context_menu(|ui| {
-                                    show_row_context_menu(ui, item_app, &mut app_to_uninstall, &mut app_to_force, &mut app_to_remove_entry, &mut app_to_dismiss_single, &mut app_to_dismiss_all);
-                                });
+                            let (_, resp5) = row.col(|ui| {
                                 let is_traced = app.traced_apps.iter().any(|t| t.name.eq_ignore_ascii_case(&item_app.name) || t.id == item_app.id);
                                 let tag = if is_traced {
                                     crate::i18n::t(lang, "⚡ Отслежено", "⚡ Traced")
@@ -775,14 +663,17 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                 let tag_color = if is_selected { Color32::WHITE } else if app.dark_mode { Color32::from_rgb(161, 161, 170) } else { Color32::from_rgb(100, 116, 139) };
                                 ui.label(RichText::new(tag).color(tag_color));
                             });
+                            handle_cell(resp5);
                         });
                     });
+                });
             }
 
             if let Some(id_to_clear) = app_to_dismiss_single {
                 if let Some(a_mut) = app.apps.iter_mut().find(|a| a.id == id_to_clear) {
                     a_mut.is_new = false;
                 }
+                app.bump_apps_generation();
                 save_known_apps(&app.apps);
                 app.new_apps_count = app.apps.iter().filter(|a| a.is_new).count();
                 app.status_msg = crate::i18n::t(lang, "Отметка «Новое» снята.", "Mark \"New\" cleared.").to_string();
@@ -791,6 +682,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 for a in &mut app.apps {
                     a.is_new = false;
                 }
+                app.bump_apps_generation();
                 save_known_apps(&app.apps);
                 app.new_apps_count = 0;
                 app.status_msg = crate::i18n::t(lang, "Все отметки «Новое» сброшены.", "All \"New\" marks cleared.").to_string();

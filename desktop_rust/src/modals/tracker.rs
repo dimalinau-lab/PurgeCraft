@@ -9,17 +9,21 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     }
 
     let lang = app.lang();
-    let mut is_open = true;
-    egui::Window::new(crate::i18n::t(lang, "Установить и следить за программой", "Install and Track Program"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(580.0);
-            ui.set_height(420.0);
+    let is_detached = app.detached_modals.contains("modal_tracker");
+    let mut should_close = false;
 
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_tracker",
+        crate::i18n::t(lang, "Установить и следить за программой", "Install and Track Program"),
+        None,
+        egui::vec2(580.0, 390.0),
+        egui::vec2(360.0, 240.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             match app.tracker_step {
                 TrackerStep::SelectInstaller => {
                     ui.heading(crate::i18n::t(lang, "Установка программы с отслеживанием", "Program Installation with Tracking"));
@@ -33,7 +37,8 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     ui.label(crate::i18n::t(lang, "Путь к инсталлятору (.exe, .msi):", "Path to installer (.exe, .msi):"));
                     ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut app.tracker_installer_path).desired_width(420.0));
+                        let input_w = (ui.available_width() - 105.0).max(140.0);
+                        ui.add(egui::TextEdit::singleline(&mut app.tracker_installer_path).desired_width(input_w));
                         if ui.button(crate::i18n::t(lang, "📁 Обзор...", "📁 Browse...")).clicked() {
                             let filter_name = crate::i18n::t(lang, "Инсталляторы", "Installers");
                             if let Some(p) = pick_file_dialog(filter_name, "*.exe;*.msi") {
@@ -49,12 +54,12 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     ui.add_space(8.0);
                     ui.label(crate::i18n::t(lang, "Название программы:", "Application name:"));
-                    ui.add(egui::TextEdit::singleline(&mut app.tracker_app_name).desired_width(420.0));
+                    ui.add(egui::TextEdit::singleline(&mut app.tracker_app_name).desired_width(ui.available_width().max(150.0)));
 
                     ui.add_space(16.0);
                     ui.horizontal(|ui| {
                         if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
-                            app.tracker_modal_open = false;
+                            should_close = true;
                         }
                         let can_start = !app.tracker_installer_path.trim().is_empty() && std::path::Path::new(&app.tracker_installer_path).exists();
                         let start_label = crate::i18n::t(lang, "▶ Начать снимок и запустить установку", "▶ Begin Snapshot & Run Installer");
@@ -89,7 +94,7 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.label(RichText::new(crate::i18n::t(lang, "Прогресс установки:", "Installation progress:")).strong().size(12.5));
                     ui.add_space(4.0);
 
-                    // Dark Terminal Log Box
+                    // Dark Terminal Log Box (virtualized row rendering so 10,000+ entries scroll smoothly)
                     let log_bg = if app.dark_mode { Color32::from_rgb(15, 17, 23) } else { Color32::from_rgb(15, 23, 42) };
                     let border_color = if app.dark_mode { Color32::from_rgb(60, 64, 75) } else { Color32::from_rgb(51, 65, 85) };
 
@@ -98,40 +103,82 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         .stroke(Stroke::new(1.0_f32, border_color))
                         .inner_margin(8.0)
                         .show(ui, |ui| {
-                            ui.set_min_width(540.0);
-                            ui.set_height(250.0);
+                            let panel_w = (ui.available_width()).max(220.0);
+                            let log_box_h = super::fill_scroll_height(ui, 44.0, 96.0);
+                            ui.set_width(panel_w);
+                            ui.set_height(log_box_h);
 
+                            let row_height = 18.0;
+                            let total_rows = app.tracker_live_log.len();
                             egui::ScrollArea::vertical()
+                                .id_salt("tracker_live_log_scroll")
                                 .stick_to_bottom(true)
-                                .max_height(245.0)
-                                .show(ui, |ui| {
-                                    for entry in &app.tracker_live_log {
-                                        ui.horizontal(|ui| {
-                                            // Col 1: Time (width 70)
-                                            ui.allocate_ui_with_layout(Vec2::new(70.0, 16.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                                ui.label(RichText::new(&entry.time).monospace().size(11.5).color(Color32::from_rgb(203, 213, 225)));
-                                            });
+                                .auto_shrink([false, false])
+                                .max_height((log_box_h - 4.0).max(80.0))
+                                .show_rows(ui, row_height, total_rows, |ui, row_range| {
+                                    ui.style_mut().interaction.selectable_labels = false;
+                                    let row_w = ui.available_width().max(200.0);
+                                    for idx in row_range {
+                                        if let Some(entry) = app.tracker_live_log.get(idx) {
+                                            ui.allocate_ui_with_layout(
+                                                Vec2::new(row_w, row_height),
+                                                egui::Layout::left_to_right(egui::Align::Center),
+                                                |ui| {
+                                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                                    ui.allocate_ui_with_layout(
+                                                        Vec2::new(64.0, row_height),
+                                                        egui::Layout::left_to_right(egui::Align::Center),
+                                                        |ui| {
+                                                            ui.label(
+                                                                RichText::new(&entry.time)
+                                                                    .monospace()
+                                                                    .size(11.5)
+                                                                    .color(Color32::from_rgb(203, 213, 225)),
+                                                            );
+                                                        },
+                                                    );
 
-                                            // Col 2: Action (width 110)
-                                            ui.allocate_ui_with_layout(Vec2::new(110.0, 16.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                                if !entry.action.is_empty() {
-                                                    let act_color = match entry.action.as_str() {
-                                                        "Создана папка" | "Folder Created" => Color32::from_rgb(234, 179, 8),
-                                                        "Создан ключ реестра" | "Запись реестра" | "Registry Key Created" | "Registry Entry" => Color32::from_rgb(168, 85, 247),
-                                                        _ => Color32::from_rgb(56, 189, 248),
+                                                    ui.allocate_ui_with_layout(
+                                                        Vec2::new(112.0, row_height),
+                                                        egui::Layout::left_to_right(egui::Align::Center),
+                                                        |ui| {
+                                                            if !entry.action.is_empty() {
+                                                                let act_color = match entry.action.as_str() {
+                                                                    "Создана папка" | "Folder Created" => Color32::from_rgb(234, 179, 8),
+                                                                    "Создан ключ реестра" | "Запись реестра" | "Registry Key Created" | "Registry Entry" => Color32::from_rgb(168, 85, 247),
+                                                                    _ => Color32::from_rgb(56, 189, 248),
+                                                                };
+                                                                ui.add(
+                                                                    egui::Label::new(
+                                                                        RichText::new(&entry.action)
+                                                                            .monospace()
+                                                                            .size(11.5)
+                                                                            .color(act_color),
+                                                                    )
+                                                                    .truncate(),
+                                                                );
+                                                            }
+                                                        },
+                                                    );
+
+                                                    let path_color = if entry.action.is_empty() {
+                                                        Color32::from_rgb(241, 245, 249)
+                                                    } else {
+                                                        Color32::from_rgb(226, 232, 240)
                                                     };
-                                                    ui.label(RichText::new(&entry.action).monospace().size(11.5).color(act_color));
-                                                }
-                                            });
-
-                                            // Col 3: Path / Message
-                                            let path_color = if entry.action.is_empty() {
-                                                Color32::from_rgb(241, 245, 249)
-                                            } else {
-                                                Color32::from_rgb(226, 232, 240)
-                                            };
-                                            ui.label(RichText::new(&entry.path).monospace().size(11.5).color(path_color));
-                                        });
+                                                    ui.add(
+                                                        egui::Label::new(
+                                                            RichText::new(&entry.path)
+                                                                .monospace()
+                                                                .size(11.5)
+                                                                .color(path_color),
+                                                        )
+                                                        .truncate(),
+                                                    )
+                                                    .on_hover_text(&entry.path);
+                                                },
+                                            );
+                                        }
                                     }
                                 });
                         });
@@ -197,16 +244,29 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.label(count_text);
                     ui.separator();
 
-                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                        if app.tracker_traces.is_empty() {
-                            ui.label(crate::i18n::t(lang, "Новых файлов или ключей реестра не зафиксировано.", "No new files or registry keys were detected."));
-                        } else {
-                            for t in &app.tracker_traces {
-                                let icon = if t.trace_type == "registry_key" { "🗄" } else { "📁" };
-                                ui.label(format!("{} {}", icon, t.path));
-                            }
-                        }
-                    });
+                    if app.tracker_traces.is_empty() {
+                        ui.label(crate::i18n::t(lang, "Новых файлов или ключей реестра не зафиксировано.", "No new files or registry keys were detected."));
+                    } else {
+                        let row_height = 18.0;
+                        let list_h = super::fill_scroll_height(ui, 50.0, 90.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("tracker_review_traces_scroll")
+                            .max_height(list_h)
+                            .auto_shrink([false, false])
+                            .show_rows(ui, row_height, app.tracker_traces.len(), |ui, row_range| {
+                                ui.style_mut().interaction.selectable_labels = false;
+                                for idx in row_range {
+                                    if let Some(t) = app.tracker_traces.get(idx) {
+                                        let icon = if t.trace_type == "registry_key" { "🗄" } else { "📁" };
+                                        ui.add_sized(
+                                            Vec2::new(ui.available_width(), row_height),
+                                            egui::Label::new(format!("{} {}", icon, t.path)).truncate(),
+                                        )
+                                        .on_hover_text(&t.path);
+                                    }
+                                }
+                            });
+                    }
 
                     ui.separator();
                     ui.add_space(8.0);
@@ -240,15 +300,19 @@ pub fn render_tracker_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     });
                 }
             }
-        });
+        },
+    );
 
-    if !is_open {
+    if should_close {
+        app.tracker_modal_open = false;
+    }
+    super::sync_detachable_state("modal_tracker", &mut app.detached_modals, &mut app.tracker_modal_open, outcome);
+    if !app.tracker_modal_open {
         if let Some(stop) = app.tracker_stop_tx.take() {
             let _ = stop.send(());
         }
         app.tracker_rx = None;
         app.tracker_child = None;
-        app.tracker_modal_open = false;
         app.tracker_step = TrackerStep::SelectInstaller;
     }
 }

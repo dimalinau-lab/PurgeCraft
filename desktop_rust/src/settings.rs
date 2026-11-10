@@ -203,3 +203,38 @@ pub fn is_windows_dark_mode() -> bool {
     }
     true
 }
+
+pub fn resolve_dark_mode(theme_mode: &str) -> bool {
+    match theme_mode {
+        "light" => false,
+        "system" => is_windows_dark_mode(),
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_settings_defaults_and_serde_roundtrip() {
+        let def = AppSettings::default();
+        assert_eq!(def.theme_mode, "dark");
+        assert!(resolve_dark_mode("dark"));
+        assert!(!resolve_dark_mode("light"));
+        assert!((def.text_scale - 1.15).abs() < f32::EPSILON);
+
+        let json = serde_json::to_string(&def).unwrap();
+        let parsed: AppSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.github_repo, def.github_repo);
+        assert_eq!(parsed.wizard_auto_start, "auto");
+    }
+
+    #[test]
+    fn test_settings_partial_json_falls_back_to_default() {
+        // Missing required fields should gracefully fall back rather than panicking
+        let broken = r#"{"language": "English"}"#;
+        let parsed: AppSettings = serde_json::from_str(broken).unwrap_or_default();
+        assert_eq!(parsed.github_repo, "dimalinau-lab/PurgeCraft");
+    }
+}

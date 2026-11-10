@@ -74,10 +74,10 @@ pub fn jump_to_regedit(registry_path: &str) {
         let _ = Command::new("regedit").spawn();
         return;
     }
-    let full_path = if registry_path.starts_with("HKLM") {
-        format!("Computer\\HKEY_LOCAL_MACHINE{}", &registry_path[4..])
-    } else if registry_path.starts_with("HKCU") {
-        format!("Computer\\HKEY_CURRENT_USER{}", &registry_path[4..])
+    let full_path = if let Some(rest) = registry_path.strip_prefix("HKLM") {
+        format!("Computer\\HKEY_LOCAL_MACHINE{}", rest)
+    } else if let Some(rest) = registry_path.strip_prefix("HKCU") {
+        format!("Computer\\HKEY_CURRENT_USER{}", rest)
     } else {
         format!("Computer\\{}", registry_path)
     };
@@ -137,10 +137,8 @@ pub fn spawn_size_calculator(apps: &[InstalledApp], tx: std::sync::mpsc::Sender<
             let dir = if p.is_file() { p.parent().unwrap_or(p) } else { p };
             if scanner::is_safe_app_dir(dir) {
                 let sz = scanner::get_folder_size(dir);
-                if sz > 0 {
-                    if tx.send((id, sz)).is_err() {
-                        break;
-                    }
+                if sz > 0 && tx.send((id, sz)).is_err() {
+                    break;
                 }
             }
         }
@@ -174,5 +172,63 @@ pub fn truncate_chars(s: &str, max_chars: usize) -> String {
         format!("{}...", truncated)
     } else {
         s.to_string()
+    }
+}
+
+/// Returns the prefix slice of `s` ending right after the first ASCII case-insensitive match of `needle_ascii`.
+/// Guarantees valid UTF-8 char boundaries and performs zero heap allocations.
+pub fn slice_through_ascii_ignore_case<'a>(s: &'a str, needle_ascii: &str) -> Option<&'a str> {
+    debug_assert!(needle_ascii.is_ascii());
+    let n_bytes = needle_ascii.as_bytes();
+    if n_bytes.is_empty() || s.len() < n_bytes.len() {
+        return None;
+    }
+    s.as_bytes()
+        .windows(n_bytes.len())
+        .position(|w| w.eq_ignore_ascii_case(n_bytes))
+        .map(|pos| &s[..pos + n_bytes.len()])
+}
+
+/// Extracts the executable path prefix (up to `.exe`) from a command or uninstall string.
+pub fn extract_exe_prefix(raw: &str) -> &str {
+    let clean = raw.trim().trim_matches('"');
+    slice_through_ascii_ignore_case(clean, ".exe").unwrap_or(clean)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_exe_prefix_handles_unicode_and_args() {
+        assert_eq!(
+            extract_exe_prefix(r#""C:\Program Files\Игры\İApp\unins000.EXE" /SILENT"#),
+            r#"C:\Program Files\Игры\İApp\unins000.EXE"#
+        );
+        assert_eq!(
+            extract_exe_prefix(r#"C:\Tools\app.exe --uninstall"#),
+            r#"C:\Tools\app.exe"#
+        );
+        assert_eq!(
+            extract_exe_prefix(r#"msiexec /X{1234}"#),
+            r#"msiexec /X{1234}"#
+        );
+    }
+
+    #[test]
+    fn test_slice_through_ascii_ignore_case_edge_cases() {
+        assert_eq!(slice_through_ascii_ignore_case("", ".exe"), None);
+        assert_eq!(slice_through_ascii_ignore_case("app.exe", ""), None);
+        assert_eq!(slice_through_ascii_ignore_case("a.e", ".exe"), None);
+        assert_eq!(
+            slice_through_ascii_ignore_case(r"C:\sys\driver.SYS /flag", ".sys "),
+            Some(r"C:\sys\driver.SYS ")
+        );
+    }
+
+    #[test]
+    fn test_truncate_chars_unicode() {
+        assert_eq!(truncate_chars("Привет мир!", 8), "Приве...");
+        assert_eq!(truncate_chars("abc", 5), "abc");
     }
 }

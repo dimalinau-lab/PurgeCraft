@@ -3,8 +3,24 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 use eframe::egui::{self, Color32, RichText, Vec2, Stroke};
 use crate::app::PurgeCraftApp;
-use crate::scanner::{self, scan_leftovers, add_startup_item, scan_startup_items, pick_file_dialog};
+use crate::scanner::{self, InstalledApp, LeftoverTrace, scan_leftovers, add_startup_item, scan_startup_items, pick_file_dialog};
 use crate::types::{format_size_lang, truncate_chars};
+
+fn collect_batch_leftovers(batch: &[InstalledApp], all_apps: &[InstalledApp]) -> Vec<LeftoverTrace> {
+    let batch_ids: std::collections::HashSet<&str> = batch.iter().map(|a| a.id.as_str()).collect();
+    let other_apps: Vec<InstalledApp> = all_apps
+        .iter()
+        .filter(|a| !batch_ids.contains(a.id.as_str()))
+        .cloned()
+        .collect();
+    let mut combined = Vec::new();
+    for a in batch {
+        combined.extend(scan_leftovers(a, &other_apps));
+    }
+    let mut seen = std::collections::HashSet::new();
+    combined.retain(|t| seen.insert(t.path.to_lowercase()));
+    combined
+}
 
 pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let lang = app.lang();
@@ -12,13 +28,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 0. Single Uninstall Confirmation Modal
     if app.uninstall_confirm_open {
         if let Some(target_app) = app.uninstall_target_app.clone() {
-            egui::Window::new(crate::i18n::t(lang, "Подтверждение деинсталляции", "Uninstall Confirmation"))
-                .collapsible(false)
-                .resizable(false)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_pos(ctx.screen_rect().center())
-                .show(ctx, |ui| {
-                    ui.set_width(450.0);
+            super::show_confirm_window(
+                ctx,
+                "dlg_uninstall_confirm",
+                crate::i18n::t(lang, "Подтверждение деинсталляции", "Uninstall Confirmation"),
+                egui::vec2(450.0, 175.0),
+                egui::vec2(300.0, 140.0),
+                |ui| {
                     ui.heading(crate::i18n::t(lang, "Деинсталляция программы", "Program Uninstallation"));
                     ui.add_space(8.0);
                     let confirm_msg = format!(
@@ -34,29 +50,31 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ));
                     ui.add_space(16.0);
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
-                            app.uninstall_confirm_open = false;
-                            app.uninstall_target_app = None;
-                        }
-                        let uninst_btn = egui::Button::new(
-                            RichText::new(crate::i18n::t(lang, "Деинсталлировать", "Uninstall")).strong().color(Color32::WHITE),
-                        )
-                        .fill(Color32::from_rgb(37, 99, 235))
-                        .min_size(Vec2::new(145.0, 26.0));
-
-                        if ui.add(uninst_btn).clicked() {
-                            app.uninstall_confirm_open = false;
-                            app.uninstall_target_app = None;
-                            let running = scanner::find_running_processes_for_app(&target_app);
-                            if !running.is_empty() {
-                                app.running_processes = running;
-                                app.running_processes_target_app = Some(target_app);
-                                app.running_processes_modal_open = true;
-                            } else {
-                                app.execute_uninstall(target_app);
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
+                                app.uninstall_confirm_open = false;
+                                app.uninstall_target_app = None;
                             }
-                        }
+                            let uninst_btn = egui::Button::new(
+                                RichText::new(crate::i18n::t(lang, "Деинсталлировать", "Uninstall")).strong().color(Color32::WHITE),
+                            )
+                            .fill(Color32::from_rgb(37, 99, 235))
+                            .min_size(Vec2::new(145.0, 26.0));
+
+                            if ui.add(uninst_btn).clicked() {
+                                app.uninstall_confirm_open = false;
+                                app.uninstall_target_app = None;
+                                let running = scanner::find_running_processes_for_app(&target_app);
+                                if !running.is_empty() {
+                                    app.running_processes = running;
+                                    app.running_processes_target_app = Some(target_app);
+                                    app.running_processes_modal_open = true;
+                                } else {
+                                    app.execute_uninstall(target_app);
+                                }
+                            }
+                        });
                     });
                 });
         }
@@ -65,13 +83,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 0a. Running Processes Termination Modal
     if app.running_processes_modal_open {
         if let Some(target_app) = app.running_processes_target_app.clone() {
-            egui::Window::new(crate::i18n::t(lang, "Принудительно завершить запущенные процессы?", "Terminate Running Processes?"))
-                .collapsible(false)
-                .resizable(false)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_pos(ctx.screen_rect().center())
-                .show(ctx, |ui| {
-                    ui.set_width(520.0);
+            super::show_confirm_window(
+                ctx,
+                "dlg_running_procs",
+                crate::i18n::t(lang, "Принудительно завершить запущенные процессы?", "Terminate Running Processes?"),
+                egui::vec2(520.0, 320.0),
+                egui::vec2(340.0, 220.0),
+                |ui| {
 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("⛔").size(24.0));
@@ -89,12 +107,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         .stroke(Stroke::new(1.0_f32, if app.dark_mode { Color32::from_rgb(63, 63, 70) } else { Color32::from_rgb(229, 231, 235) }))
                         .inner_margin(8.0)
                         .show(ui, |ui| {
-                            egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                            let scroll_h = super::fill_scroll_height(ui, 95.0, 70.0);
+                            egui::ScrollArea::vertical().max_height(scroll_h).auto_shrink([false, false]).show(ui, |ui| {
                                 for proc in &app.running_processes {
                                     ui.horizontal(|ui| {
                                         ui.label(RichText::new(format!("[PID {}]", proc.pid)).monospace().color(Color32::from_rgb(245, 158, 11)));
                                         ui.label(RichText::new(&proc.name).strong());
-                                        ui.label(RichText::new(format!("({})", truncate_chars(&proc.exe_path, 40))).color(Color32::GRAY));
+                                        ui.add(egui::Label::new(RichText::new(format!("({})", truncate_chars(&proc.exe_path, 40))).color(Color32::GRAY)).truncate());
                                     });
                                 }
                             });
@@ -111,7 +130,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     ui.add_space(14.0);
 
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button(RichText::new(crate::i18n::t(lang, "⛔ Завершить процессы", "⛔ Terminate Processes")).strong().color(Color32::WHITE)).clicked() {
                             for proc in &app.running_processes {
                                 let _ = scanner::terminate_process_by_pid(proc.pid);
@@ -141,13 +160,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
     // 0d. Delayed Files Removal On Reboot Modal
     if app.delayed_removal_modal_open {
-        egui::Window::new(crate::i18n::t(lang, "Некоторые файлы не удалены", "Some files could not be deleted"))
-            .collapsible(false)
-            .resizable(false)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
-            .show(ctx, |ui| {
-                ui.set_width(540.0);
+        super::show_confirm_window(
+            ctx,
+            "dlg_delayed_removal",
+            crate::i18n::t(lang, "Некоторые файлы не удалены", "Some files could not be deleted"),
+            egui::vec2(540.0, 320.0),
+            egui::vec2(340.0, 220.0),
+            |ui| {
 
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("🔒").size(24.0));
@@ -169,11 +188,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     .stroke(Stroke::new(1.0_f32, if app.dark_mode { Color32::from_rgb(63, 63, 70) } else { Color32::from_rgb(229, 231, 235) }))
                     .inner_margin(8.0)
                     .show(ui, |ui| {
-                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        let scroll_h = super::fill_scroll_height(ui, 90.0, 70.0);
+                        egui::ScrollArea::vertical().max_height(scroll_h).auto_shrink([false, false]).show(ui, |ui| {
                             for file in &app.delayed_removal_files {
                                 ui.horizontal(|ui| {
                                     ui.label(RichText::new("⏳").color(Color32::from_rgb(245, 158, 11)));
-                                    ui.label(RichText::new(file).monospace().color(if app.dark_mode { Color32::from_rgb(229, 231, 235) } else { Color32::from_rgb(31, 41, 55) }));
+                                    ui.add(egui::Label::new(RichText::new(file).monospace().color(if app.dark_mode { Color32::from_rgb(229, 231, 235) } else { Color32::from_rgb(31, 41, 55) })).truncate())
+                                        .on_hover_text(file);
                                 });
                             }
                         });
@@ -212,14 +233,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 0b. Waiting for Native Uninstaller Completion Modal
     if app.uninstall_waiting_open {
         if let Some(target_app) = app.uninstall_waiting_app.clone() {
-            egui::Window::new(format!("{} — {}", crate::i18n::t(lang, "Деинсталляция", "Uninstallation"), target_app.name))
-                .id(egui::Id::new("single_uninstall_progress_dialog"))
-                .collapsible(false)
-                .resizable(false)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_pos(ctx.screen_rect().center())
-                .show(ctx, |ui| {
-                    ui.set_width(480.0);
+            super::show_confirm_window(
+                ctx,
+                "single_uninstall_progress_dialog",
+                format!("{} — {}", crate::i18n::t(lang, "Деинсталляция", "Uninstallation"), target_app.name),
+                egui::vec2(480.0, 200.0),
+                egui::vec2(320.0, 160.0),
+                |ui| {
                     ui.heading(RichText::new(crate::i18n::t(lang, "Выполняется штатная деинсталляция...", "Standard uninstaller in progress...")).color(Color32::from_rgb(96, 165, 250)));
                     ui.add_space(8.0);
                     ui.label(crate::i18n::t(lang, "Запущен штатный деинсталлятор программы.", "Standard program uninstaller has been launched."));
@@ -243,13 +263,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 1. Single Force Removal Confirmation
     if app.force_confirm_open {
         if let Some(target_app) = app.force_confirm_app.clone() {
-            egui::Window::new(crate::i18n::t(lang, "Принудительное удаление программы", "Force Program Removal"))
-                .collapsible(false)
-                .resizable(false)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_pos(ctx.screen_rect().center())
-                .show(ctx, |ui| {
-                    ui.set_width(450.0);
+            super::show_confirm_window(
+                ctx,
+                "dlg_force_confirm",
+                crate::i18n::t(lang, "Принудительное удаление программы", "Force Program Removal"),
+                egui::vec2(450.0, 180.0),
+                egui::vec2(300.0, 145.0),
+                |ui| {
                     ui.label(RichText::new(crate::i18n::t(lang, "Внимание!", "Warning!")).color(Color32::from_rgb(239, 68, 68)).heading());
                     ui.add_space(8.0);
                     ui.label(format!("{} «{}»?", crate::i18n::t(lang, "Вы действительно хотите принудительно удалить", "Are you sure you want to forcibly remove"), target_app.name));
@@ -260,19 +280,21 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ));
                     ui.add_space(16.0);
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
-                            app.force_confirm_open = false;
-                            app.force_confirm_app = None;
-                        }
-                        let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Начать удаление", "Start Removal")).strong().color(Color32::WHITE))
-                            .fill(Color32::from_rgb(220, 38, 38))
-                            .min_size(Vec2::new(135.0, 26.0));
-                        if ui.add(btn).clicked() {
-                            app.force_confirm_open = false;
-                            app.force_confirm_app = None;
-                            app.start_wizard_scan(target_app);
-                        }
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
+                                app.force_confirm_open = false;
+                                app.force_confirm_app = None;
+                            }
+                            let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Начать удаление", "Start Removal")).strong().color(Color32::WHITE))
+                                .fill(Color32::from_rgb(220, 38, 38))
+                                .min_size(Vec2::new(135.0, 26.0));
+                            if ui.add(btn).clicked() {
+                                app.force_confirm_open = false;
+                                app.force_confirm_app = None;
+                                app.start_wizard_scan(target_app);
+                            }
+                        });
                     });
                 });
         }
@@ -281,13 +303,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 1b. Remove Registry Entry Confirmation Modal
     if app.remove_entry_confirm_open {
         if let Some(target_app) = app.remove_entry_confirm_app.clone() {
-            egui::Window::new(crate::i18n::t(lang, "Удаление записи из реестра", "Remove Registry Entry"))
-                .collapsible(false)
-                .resizable(false)
-                .pivot(egui::Align2::CENTER_CENTER)
-                .default_pos(ctx.screen_rect().center())
-                .show(ctx, |ui| {
-                    ui.set_width(450.0);
+            super::show_confirm_window(
+                ctx,
+                "dlg_remove_entry_confirm",
+                crate::i18n::t(lang, "Удаление записи из реестра", "Remove Registry Entry"),
+                egui::vec2(450.0, 185.0),
+                egui::vec2(300.0, 145.0),
+                |ui| {
                     ui.label(RichText::new(crate::i18n::t(lang, "Удалить запись из списка?", "Remove entry from list?")).heading());
                     ui.add_space(8.0);
                     ui.label(format!("{} «{}»?", crate::i18n::t(lang, "Вы действительно хотите удалить запись", "Are you sure you want to remove entry"), target_app.name));
@@ -298,19 +320,21 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ));
                     ui.add_space(16.0);
 
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
-                            app.remove_entry_confirm_open = false;
-                            app.remove_entry_confirm_app = None;
-                        }
-                        let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Удалить запись", "Remove Entry")).strong().color(Color32::WHITE))
-                            .fill(Color32::from_rgb(220, 38, 38))
-                            .min_size(Vec2::new(135.0, 26.0));
-                        if ui.add(btn).clicked() {
-                            app.remove_entry_confirm_open = false;
-                            app.remove_entry_confirm_app = None;
-                            app.remove_registry_entry(&target_app);
-                        }
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
+                                app.remove_entry_confirm_open = false;
+                                app.remove_entry_confirm_app = None;
+                            }
+                            let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Удалить запись", "Remove Entry")).strong().color(Color32::WHITE))
+                                .fill(Color32::from_rgb(220, 38, 38))
+                                .min_size(Vec2::new(135.0, 26.0));
+                            if ui.add(btn).clicked() {
+                                app.remove_entry_confirm_open = false;
+                                app.remove_entry_confirm_app = None;
+                                app.remove_registry_entry(&target_app);
+                            }
+                        });
                     });
                 });
         }
@@ -321,22 +345,20 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         let total = app.batch_queue_apps.len();
         let curr = app.batch_queue_idx;
 
-        egui::Window::new(format!("{} ({}/{})", crate::i18n::t(lang, "Очередь пакетной деинсталляции", "Batch Uninstall Queue"), (curr + 1).min(total), total))
-            .id(egui::Id::new("batch_uninstall_queue_dialog"))
-            .collapsible(false)
-            .resizable(true)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
-            .show(ctx, |ui| {
-                ui.set_width(540.0);
-                ui.set_height(380.0);
-
+        super::show_confirm_window(
+            ctx,
+            "batch_uninstall_queue_dialog",
+            format!("{} ({}/{})", crate::i18n::t(lang, "Очередь пакетной деинсталляции", "Batch Uninstall Queue"), (curr + 1).min(total), total),
+            egui::vec2(540.0, 350.0),
+            egui::vec2(340.0, 220.0),
+            |ui| {
                 ui.heading(crate::i18n::t(lang, "Процесс пакетного удаления программ", "Batch Program Uninstallation Process"));
                 ui.add_space(4.0);
                 ui.label(crate::i18n::t(lang, "Программы удаляются по очереди для исключения конфликтов деинсталляторов.", "Programs are uninstalled sequentially to avoid uninstaller conflicts."));
                 ui.separator();
 
-                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                let scroll_h = super::fill_scroll_height(ui, 60.0, 90.0);
+                egui::ScrollArea::vertical().max_height(scroll_h).auto_shrink([false, false]).show(ui, |ui| {
                     for (i, a) in app.batch_queue_apps.iter().enumerate() {
                         ui.horizontal(|ui| {
                             let raw_st = &app.batch_queue_statuses[i];
@@ -379,11 +401,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         if ui.button(crate::i18n::t(lang, "♻ Запустить поиск остатков для всех", "♻ Scan leftovers for all")).clicked() {
-                            let mut combined_traces = Vec::new();
-                            for a in &app.batch_queue_apps {
-                                combined_traces.extend(scan_leftovers(a));
-                            }
-                            app.wizard_traces = combined_traces;
+                            app.wizard_traces = collect_batch_leftovers(&app.batch_queue_apps, &app.apps);
                             app.wizard_app_title = format!("{} {} {}", crate::i18n::t(lang, "Пакет из", "Batch of"), app.batch_queue_apps.len(), crate::i18n::t(lang, "программ", "programs"));
                             app.wizard_report = None;
                             app.batch_queue_open = false;
@@ -402,14 +420,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     // 3. Batch Force Removal Confirmation Modal
     if app.batch_force_open {
         let count = app.batch_force_apps.len();
-        egui::Window::new(format!("{} ({} {})", crate::i18n::t(lang, "Пакетное принудительное удаление", "Batch Force Removal"), count, crate::i18n::t(lang, "программ", "programs")))
-            .id(egui::Id::new("batch_force_modal"))
-            .collapsible(false)
-            .resizable(false)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
-            .show(ctx, |ui| {
-                ui.set_width(480.0);
+        super::show_confirm_window(
+            ctx,
+            "batch_force_modal",
+            format!("{} ({} {})", crate::i18n::t(lang, "Пакетное принудительное удаление", "Batch Force Removal"), count, crate::i18n::t(lang, "программ", "programs")),
+            egui::vec2(480.0, 190.0),
+            egui::vec2(320.0, 150.0),
+            |ui| {
                 ui.label(RichText::new(crate::i18n::t(lang, "Внимание! Пакетная зачистка следов", "Warning! Batch leftover purge")).color(Color32::from_rgb(239, 68, 68)).heading());
                 ui.add_space(8.0);
                 ui.label(format!("{} {} {}", crate::i18n::t(lang, "Вы выбрали", "You selected"), count, crate::i18n::t(lang, "программ для одновременного принудительного удаления.", "programs for concurrent force removal.")));
@@ -420,37 +437,35 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 ));
                 ui.add_space(16.0);
 
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
-                        app.batch_force_open = false;
-                    }
-                    let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Собрать остатки и удалить", "Collect leftovers and delete")).strong().color(Color32::WHITE))
-                        .fill(Color32::from_rgb(220, 38, 38))
-                        .min_size(Vec2::new(195.0, 26.0));
-                    if ui.add(btn).clicked() {
-                        let mut combined_traces = Vec::new();
-                        for a in &app.batch_force_apps {
-                            combined_traces.extend(scan_leftovers(a));
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
+                            app.batch_force_open = false;
                         }
-                        app.wizard_traces = combined_traces;
-                        app.wizard_app_title = format!("{} {} {}", crate::i18n::t(lang, "Пакет из", "Batch of"), count, crate::i18n::t(lang, "программ", "programs"));
-                        app.wizard_report = None;
-                        app.batch_force_open = false;
-                        app.wizard_open = true;
-                    }
+                        let btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Собрать остатки и удалить", "Collect leftovers and delete")).strong().color(Color32::WHITE))
+                            .fill(Color32::from_rgb(220, 38, 38))
+                            .min_size(Vec2::new(195.0, 26.0));
+                        if ui.add(btn).clicked() {
+                            app.wizard_traces = collect_batch_leftovers(&app.batch_force_apps, &app.apps);
+                            app.wizard_app_title = format!("{} {} {}", crate::i18n::t(lang, "Пакет из", "Batch of"), count, crate::i18n::t(lang, "программ", "programs"));
+                            app.wizard_report = None;
+                            app.batch_force_open = false;
+                            app.wizard_open = true;
+                        }
+                    });
                 });
             });
     }
 
     // 5. Add Startup Item Modal
     if app.add_startup_modal_open {
-        egui::Window::new(crate::i18n::t(lang, "➕ Добавить программу в автозапуск", "➕ Add Program to Startup"))
-            .collapsible(false)
-            .resizable(false)
-            .pivot(egui::Align2::CENTER_CENTER)
-            .default_pos(ctx.screen_rect().center())
-            .show(ctx, |ui| {
-                ui.set_width(460.0);
+        super::show_confirm_window(
+            ctx,
+            "dlg_add_startup",
+            crate::i18n::t(lang, "➕ Добавить программу в автозапуск", "➕ Add Program to Startup"),
+            egui::vec2(460.0, 290.0),
+            egui::vec2(320.0, 220.0),
+            |ui| {
                 ui.heading(crate::i18n::t(lang, "Новая запись автозагрузки", "New Startup Entry"));
                 ui.add_space(8.0);
 
@@ -460,7 +475,8 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 ui.add_space(6.0);
                 ui.label(crate::i18n::t(lang, "Путь к исполняемому файлу (.exe):", "Executable Path (.exe):"));
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut app.new_startup_path).desired_width(360.0));
+                    let path_w = (ui.available_width() - 105.0).max(140.0);
+                    ui.add(egui::TextEdit::singleline(&mut app.new_startup_path).desired_width(path_w));
                     if ui.button(crate::i18n::t(lang, "📁 Обзор...", "📁 Browse...")).clicked() {
                         if let Some(p) = pick_file_dialog(crate::i18n::t(lang, "Исполняемые файлы", "Executables"), "*.exe") {
                             if app.new_startup_name.is_empty() {
@@ -486,20 +502,20 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 }
 
                 ui.add_space(14.0);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
-                        app.add_startup_modal_open = false;
-                    }
-                    let add_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Добавить", "Add")).strong().color(Color32::WHITE))
-                        .fill(Color32::from_rgb(37, 99, 235))
-                        .min_size(Vec2::new(95.0, 26.0));
-                    if ui.add(add_btn).clicked() {
-                        if app.new_startup_name.trim().is_empty() {
-                            app.new_startup_error = Some(crate::i18n::t(lang, "Укажите имя программы", "Specify program name").to_string());
-                        } else if app.new_startup_path.trim().is_empty() {
-                            app.new_startup_error = Some(crate::i18n::t(lang, "Укажите путь к исполняемому файлу", "Specify executable path").to_string());
-                        } else {
-                            if add_startup_item(&app.new_startup_name, &app.new_startup_path, &app.new_startup_args, app.new_startup_hklm) {
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(egui::Button::new(crate::i18n::t(lang, "Отмена", "Cancel")).min_size(Vec2::new(85.0, 26.0))).clicked() {
+                            app.add_startup_modal_open = false;
+                        }
+                        let add_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Добавить", "Add")).strong().color(Color32::WHITE))
+                            .fill(Color32::from_rgb(37, 99, 235))
+                            .min_size(Vec2::new(95.0, 26.0));
+                        if ui.add(add_btn).clicked() {
+                            if app.new_startup_name.trim().is_empty() {
+                                app.new_startup_error = Some(crate::i18n::t(lang, "Укажите имя программы", "Specify program name").to_string());
+                            } else if app.new_startup_path.trim().is_empty() {
+                                app.new_startup_error = Some(crate::i18n::t(lang, "Укажите путь к исполняемому файлу", "Specify executable path").to_string());
+                            } else if add_startup_item(&app.new_startup_name, &app.new_startup_path, &app.new_startup_args, app.new_startup_hklm) {
                                 app.startup_items = scan_startup_items();
                                 app.status_msg = format!("{} «{}» {}", crate::i18n::t(lang, "Программа", "Program"), app.new_startup_name, crate::i18n::t(lang, "добавлена в автозапуск.", "added to startup."));
                                 app.add_startup_modal_open = false;
@@ -507,7 +523,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 app.new_startup_error = Some(crate::i18n::t(lang, "Ошибка добавления в реестр. Возможно, требуются права администратора.", "Failed to add to registry. Admin privileges may be required.").to_string());
                             }
                         }
-                    }
+                    });
                 });
             });
     }

@@ -7,7 +7,7 @@ pub enum Language {
 }
 
 impl Language {
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_label(s: &str) -> Self {
         if s.to_lowercase().contains("en") {
             Language::English
         } else {

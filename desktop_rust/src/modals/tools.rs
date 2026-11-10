@@ -32,20 +32,19 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         .map(|l| l.file_count)
         .sum();
 
-    egui::Window::new(crate::i18n::t(lang, "🎮 Очиститель кэша шейдеров GPU и DirectX", "🎮 GPU & DirectX Shader Cache Cleaner"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(640.0);
-            ui.set_height(460.0);
-
-            ui.horizontal(|ui| {
-                ui.heading(RichText::new(crate::i18n::t(lang, "🎮 Глубокая очистка кэшей GPU", "🎮 Deep GPU Cache Cleaning")).strong());
-            });
-            ui.add_space(4.0);
+    let is_detached = app.detached_modals.contains("modal_shader");
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_shader",
+        crate::i18n::t(lang, "🎮 Очиститель кэша шейдеров GPU и DirectX", "🎮 GPU & DirectX Shader Cache Cleaner"),
+        Some(crate::i18n::t(lang, "🎮 Глубокая очистка кэшей GPU", "🎮 Deep GPU Cache Cleaning")),
+        egui::vec2(640.0, 440.0),
+        egui::vec2(380.0, 280.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
                 "Игры и графические приложения компилируют шейдеры в системные папки драйверов (DirectX, NVIDIA, AMD). Со временем эти кэши разрастаются до десятков гигабайтов и не удаляются автоматически.",
@@ -65,7 +64,7 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             }
 
             // Selection buttons
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(crate::i18n::t(lang, "☑ Выбрать все", "☑ Select All")).clicked() {
                     for loc in &mut app.shader_locations {
                         loc.selected = true;
@@ -76,15 +75,13 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         loc.selected = false;
                     }
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan")).clicked() {
-                        do_rescan = true;
-                    }
-                });
+                if ui.button(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan")).clicked() {
+                    do_rescan = true;
+                }
             });
             ui.add_space(6.0);
 
-            // List of locations
+            // List of locations (stretches smoothly when window is resized)
             let list_bg = if app.dark_mode { Color32::from_rgb(18, 18, 20) } else { Color32::WHITE };
             egui::Frame::none()
                 .fill(list_bg)
@@ -92,38 +89,46 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .rounding(4.0)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 58.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         if app.shader_locations.is_empty() {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
+                                ui.add_space(20.0);
                                 ui.label(RichText::new(crate::i18n::t(lang, "Кэшей шейдеров не обнаружено или они уже пусты.", "No shader caches detected or they are already empty.")).color(Color32::from_rgb(148, 163, 184)));
                             });
                         } else {
                             for loc in &mut app.shader_locations {
-                                ui.horizontal(|ui| {
-                                    ui.checkbox(&mut loc.selected, "");
-                                    let vendor_color = match loc.vendor.as_str() {
-                                        "NVIDIA" => Color32::from_rgb(34, 197, 94),
-                                        "AMD" => Color32::from_rgb(239, 68, 68),
-                                        _ => Color32::from_rgb(59, 130, 246),
-                                    };
-                                    ui.label(RichText::new(format!("[{}]", loc.vendor)).strong().color(vendor_color));
-                                    ui.label(RichText::new(&loc.name).strong());
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                super::split_row(
+                                    ui,
+                                    |ui| {
                                         ui.label(RichText::new(format_size_lang(loc.size_bytes, lang)).strong());
                                         ui.label(format!("({} {})", loc.file_count, crate::i18n::t(lang, "файлов", "files")));
-                                    });
-                                });
-                                ui.label(RichText::new(&loc.path).small().color(Color32::from_rgb(113, 113, 122)));
+                                    },
+                                    |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.checkbox(&mut loc.selected, "");
+                                            let vendor_color = match loc.vendor.as_str() {
+                                                "NVIDIA" => Color32::from_rgb(34, 197, 94),
+                                                "AMD" => Color32::from_rgb(239, 68, 68),
+                                                _ => Color32::from_rgb(59, 130, 246),
+                                            };
+                                            ui.label(RichText::new(format!("[{}]", loc.vendor)).strong().color(vendor_color));
+                                            ui.add(egui::Label::new(RichText::new(&loc.name).strong()).truncate())
+                                                .on_hover_text(&loc.name);
+                                        });
+                                    },
+                                );
+                                ui.add(egui::Label::new(RichText::new(&loc.path).small().color(Color32::from_rgb(113, 113, 122))).truncate())
+                                    .on_hover_text(&loc.path);
                                 ui.separator();
                             }
                         }
                     });
                 });
 
-            ui.add_space(10.0);
-            ui.separator();
             ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(6.0);
 
             // Bottom action panel
             ui.horizontal(|ui| {
@@ -134,8 +139,6 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     total_selected_files,
                     crate::i18n::t(lang, "файлов", "files")
                 );
-                ui.label(RichText::new(info_text).strong().size(13.0));
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
@@ -147,17 +150,26 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             .color(Color32::WHITE)
                     )
                     .fill(if can_clean { Color32::from_rgb(147, 51, 234) } else { Color32::from_rgb(100, 100, 100) })
-                    .min_size(Vec2::new(160.0, 28.0));
+                    .min_size(Vec2::new(140.0, 28.0));
 
                     if ui.add_enabled(can_clean, clean_btn).clicked() {
                         do_clean = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(info_text).strong().size(13.0)).truncate());
+                    });
                 });
             });
-        });
+        },
+    );
 
-    if do_close || !is_open {
+    if do_close {
+        is_open = false;
+    }
+    super::sync_detachable_state("modal_shader", &mut app.detached_modals, &mut app.shader_modal_open, outcome);
+    if !is_open {
         app.shader_modal_open = false;
+        app.detached_modals.remove("modal_shader");
     }
 
     if do_rescan {
@@ -198,18 +210,19 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let total_broken = app.path_entries.iter().filter(|e| !e.exists).count();
     let total_duplicates = app.path_entries.iter().filter(|e| e.is_duplicate).count();
 
-    egui::Window::new(crate::i18n::t(lang, "🗄 Санитайзер системного и пользовательского PATH", "🗄 System & User PATH Sanitizer"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(780.0);
-            ui.set_height(480.0);
-
-            ui.heading(RichText::new(crate::i18n::t(lang, "🗄 Санитайзер переменных среды PATH", "🗄 PATH Environment Variables Sanitizer")).strong());
-            ui.add_space(4.0);
+    let is_detached = app.detached_modals.contains("modal_path");
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_path",
+        crate::i18n::t(lang, "🗄 Санитайзер системного и пользовательского PATH", "🗄 System & User PATH Sanitizer"),
+        Some(crate::i18n::t(lang, "🗄 Санитайзер переменных среды PATH", "🗄 PATH Environment Variables Sanitizer")),
+        egui::vec2(780.0, 460.0),
+        egui::vec2(400.0, 280.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
                 "Удаленные приложения часто оставляют «мертвые» ссылки на несуществующие каталоги в переменной PATH. Это замедляет работу командной строки и может вызывать конфликты библиотек.",
@@ -228,8 +241,8 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 ui.add_space(6.0);
             }
 
-            // Action buttons
-            ui.horizontal(|ui| {
+            // Action buttons (wraps cleanly on compact windows)
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(crate::i18n::t(lang, "☑ Битые и дубликаты", "☑ Broken & Duplicates")).clicked() {
                     for e in &mut app.path_entries {
                         e.selected = !e.exists || e.is_duplicate;
@@ -245,7 +258,6 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         e.selected = false;
                     }
                 }
-                ui.separator();
                 let stats = format!(
                     "{}: {}  •  {}: {}",
                     crate::i18n::t(lang, "Битых", "Broken"),
@@ -254,12 +266,9 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     total_duplicates
                 );
                 ui.label(RichText::new(stats).color(Color32::from_rgb(148, 163, 184)));
-
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button(crate::i18n::t(lang, "🔄 Обновить", "🔄 Refresh")).clicked() {
-                        do_rescan = true;
-                    }
-                });
+                if ui.button(crate::i18n::t(lang, "🔄 Обновить", "🔄 Refresh")).clicked() {
+                    do_rescan = true;
+                }
             });
             ui.add_space(6.0);
 
@@ -270,10 +279,11 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .rounding(4.0)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(270.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 56.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         if app.path_entries.is_empty() {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
+                                ui.add_space(20.0);
                                 ui.label(RichText::new(crate::i18n::t(lang, "Записей в PATH не обнаружено.", "No entries found in PATH.")).color(Color32::from_rgb(148, 163, 184)));
                             });
                         } else {
@@ -311,7 +321,8 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         ui.label(RichText::new(crate::i18n::t(lang, "🟢 Существует", "🟢 Exists")).small().color(Color32::from_rgb(34, 197, 94)));
                                     }
 
-                                    ui.label(RichText::new(&entry.path).monospace().size(12.0));
+                                    ui.add(egui::Label::new(RichText::new(&entry.path).monospace().size(12.0)).truncate())
+                                        .on_hover_text(&entry.path);
                                 });
                                 ui.separator();
                             }
@@ -330,8 +341,6 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     total_selected,
                     crate::i18n::t(lang, "записей", "entries")
                 );
-                ui.label(RichText::new(count_text).strong());
-
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
@@ -344,17 +353,26 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             .color(Color32::WHITE)
                     )
                     .fill(if can_clean { Color32::from_rgb(220, 38, 38) } else { Color32::from_rgb(100, 100, 100) })
-                    .min_size(Vec2::new(180.0, 28.0));
+                    .min_size(Vec2::new(165.0, 28.0));
 
                     if ui.add_enabled(can_clean, clean_btn).clicked() {
                         do_clean = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(count_text).strong()).truncate());
+                    });
                 });
             });
-        });
+        },
+    );
 
-    if do_close || !is_open {
+    if do_close {
+        is_open = false;
+    }
+    super::sync_detachable_state("modal_path", &mut app.detached_modals, &mut app.path_modal_open, outcome);
+    if !is_open {
         app.path_modal_open = false;
+        app.detached_modals.remove("modal_path");
     }
 
     if do_rescan {
@@ -406,18 +424,19 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
     let total_portable_bytes: u64 = app.portable_apps.iter().map(|a| a.size_bytes).sum();
 
-    egui::Window::new(crate::i18n::t(lang, "📦 Сканер Portable-программ", "📦 Portable Apps Scanner"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(740.0);
-            ui.set_height(480.0);
-
-            ui.heading(RichText::new(crate::i18n::t(lang, "📦 Сканер Portable-софта", "📦 Portable Apps Scanner")).strong());
-            ui.add_space(4.0);
+    let is_detached = app.detached_modals.contains("modal_portable");
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_portable",
+        crate::i18n::t(lang, "📦 Сканер Portable-программ", "📦 Portable Apps Scanner"),
+        Some(crate::i18n::t(lang, "📦 Сканер Portable-софта", "📦 Portable Apps Scanner")),
+        egui::vec2(740.0, 460.0),
+        egui::vec2(400.0, 280.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
                 "Обнаруживает автономные программы и утилиты, которые запускаются без установки (на Рабочем столе, в Загрузках или в пользовательских папках).",
@@ -437,23 +456,21 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             }
 
             // Action buttons
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui.button(crate::i18n::t(lang, "📂 Добавить папку для сканирования...", "📂 Add folder to scan...")).clicked() {
                     do_pick_folder = true;
                 }
                 if ui.button(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan")).clicked() {
                     do_rescan = true;
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let found_text = format!(
-                        "{}: {} {} ({})",
-                        crate::i18n::t(lang, "Найдено:", "Found:"),
-                        app.portable_apps.len(),
-                        crate::i18n::t(lang, "программ", "apps"),
-                        format_size_lang(total_portable_bytes, lang)
-                    );
-                    ui.label(found_text);
-                });
+                let found_text = format!(
+                    "{}: {} {} ({})",
+                    crate::i18n::t(lang, "Найдено:", "Found:"),
+                    app.portable_apps.len(),
+                    crate::i18n::t(lang, "программ", "apps"),
+                    format_size_lang(total_portable_bytes, lang)
+                );
+                ui.label(found_text);
             });
             ui.add_space(6.0);
 
@@ -464,33 +481,18 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .rounding(4.0)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(270.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 54.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         if app.portable_apps.is_empty() {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
+                                ui.add_space(20.0);
                                 ui.label(RichText::new(crate::i18n::t(lang, "Portable-программ в стандартных каталогах не найдено.", "No portable applications found in standard directories.")).color(Color32::from_rgb(148, 163, 184)));
                             });
                         } else {
                             for p_app in &app.portable_apps {
-                                ui.horizontal(|ui| {
-                                    ui.label(RichText::new("📦").size(18.0));
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new(&p_app.name).strong());
-                                            ui.label(RichText::new(format!("({})", format_size_lang(p_app.size_bytes, lang))).color(Color32::from_rgb(34, 197, 94)));
-                                            let meta_text = format!(
-                                                "{} {} | {} {}",
-                                                crate::i18n::t(lang, "Файлов:", "Files:"),
-                                                p_app.file_count,
-                                                crate::i18n::t(lang, "Изменен:", "Modified:"),
-                                                p_app.modified_date
-                                            );
-                                            ui.label(RichText::new(meta_text).small().color(Color32::from_rgb(148, 163, 184)));
-                                        });
-                                        ui.label(RichText::new(&p_app.exe_path).small().color(Color32::from_rgb(113, 113, 122)));
-                                    });
-
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                super::split_row(
+                                    ui,
+                                    |ui| {
                                         if ui.button(crate::i18n::t(lang, "🗑 Удалить", "🗑 Delete")).clicked() {
                                             app_to_delete = Some(p_app.clone());
                                         }
@@ -500,8 +502,30 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         if ui.button(crate::i18n::t(lang, "▶ Запустить", "▶ Launch")).clicked() {
                                             app_to_launch = Some(p_app.exe_path.clone());
                                         }
-                                    });
-                                });
+                                    },
+                                    |ui| {
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new("📦").size(18.0));
+                                            ui.vertical(|ui| {
+                                                ui.add(egui::Label::new(RichText::new(&p_app.name).strong()).truncate())
+                                                    .on_hover_text(&p_app.name);
+                                                ui.horizontal_wrapped(|ui| {
+                                                    ui.label(RichText::new(format!("({})", format_size_lang(p_app.size_bytes, lang))).small().color(Color32::from_rgb(34, 197, 94)));
+                                                    let meta_text = format!(
+                                                        "{} {} | {} {}",
+                                                        crate::i18n::t(lang, "Файлов:", "Files:"),
+                                                        p_app.file_count,
+                                                        crate::i18n::t(lang, "Изменен:", "Modified:"),
+                                                        p_app.modified_date
+                                                    );
+                                                    ui.label(RichText::new(meta_text).small().color(Color32::from_rgb(148, 163, 184)));
+                                                });
+                                                ui.add(egui::Label::new(RichText::new(&p_app.exe_path).small().color(Color32::from_rgb(113, 113, 122))).truncate())
+                                                    .on_hover_text(&p_app.exe_path);
+                                            });
+                                        });
+                                    },
+                                );
                                 ui.separator();
                             }
                         }
@@ -513,17 +537,25 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                ui.label(RichText::new(crate::i18n::t(lang, "Portable-софт удаляется без следов в системных реестрах.", "Portable apps are removed without registry traces.")).small());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(crate::i18n::t(lang, "Portable-софт удаляется без следов в системных реестрах.", "Portable apps are removed without registry traces.")).small()).truncate());
+                    });
                 });
             });
-        });
+        },
+    );
 
-    if do_close || !is_open {
+    if do_close {
+        is_open = false;
+    }
+    super::sync_detachable_state("modal_portable", &mut app.detached_modals, &mut app.portable_modal_open, outcome);
+    if !is_open {
         app.portable_modal_open = false;
+        app.detached_modals.remove("modal_portable");
     }
 
     if do_pick_folder {
@@ -553,6 +585,7 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 app.recently_uninstalled.insert(id);
                 app.recently_uninstalled.insert(del_app.name.to_lowercase());
                 app.apps.retain(|a| !app.recently_uninstalled.contains(&a.id.to_lowercase()) && !app.recently_uninstalled.contains(&a.name.to_lowercase()));
+                app.bump_apps_generation();
                 app.portable_msg = Some(format!(
                     "{} '{}' {} {}.",
                     crate::i18n::t(lang, "Программа", "Application"),
@@ -584,18 +617,19 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let mut do_close = false;
     let mut runtime_to_uninstall: Option<String> = None;
 
-    egui::Window::new(crate::i18n::t(lang, "⚖ Анализатор дубликатов версий (Visual C++, Java, .NET)", "⚖ Runtime Duplicate Analyzer (Visual C++, Java, .NET)"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(760.0);
-            ui.set_height(480.0);
-
-            ui.heading(RichText::new(crate::i18n::t(lang, "⚖ Анализатор дубликатов системных сред выполнения", "⚖ System Runtime Duplicate Analyzer")).strong());
-            ui.add_space(4.0);
+    let is_detached = app.detached_modals.contains("modal_runtime");
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_runtime",
+        crate::i18n::t(lang, "⚖ Анализатор дубликатов версий (Visual C++, Java, .NET)", "⚖ Runtime Duplicate Analyzer (Visual C++, Java, .NET)"),
+        Some(crate::i18n::t(lang, "⚖ Анализатор дубликатов системных сред выполнения", "⚖ System Runtime Duplicate Analyzer")),
+        egui::vec2(760.0, 460.0),
+        egui::vec2(400.0, 280.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
                 "Игры и приложения часто устанавливают избыточные и устаревшие сборки Microsoft Visual C++, Java и .NET. Здесь вы можете найти дубликаты и безопасно удалить их.",
@@ -621,15 +655,16 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .rounding(4.0)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 54.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         if app.runtime_groups.is_empty() {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
+                                ui.add_space(20.0);
                                 ui.label(RichText::new(crate::i18n::t(lang, "Установленных сред выполнения не обнаружено.", "No installed runtimes found.")).color(Color32::from_rgb(148, 163, 184)));
                             });
                         } else {
                             for group in &app.runtime_groups {
-                                ui.horizontal(|ui| {
+                                ui.horizontal_wrapped(|ui| {
                                     ui.heading(RichText::new(&group.family_name).size(15.0).strong());
                                     if group.duplicate_count > 0 {
                                         let dup_label = format!("⚠ {}: {}", crate::i18n::t(lang, "Дубликатов", "Duplicates"), group.duplicate_count);
@@ -642,29 +677,35 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 ui.add_space(2.0);
 
                                 for item in &group.items {
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("[{}]", item.arch)).strong().color(Color32::from_rgb(59, 130, 246)));
-                                        ui.label(RichText::new(&item.display_name).strong());
-
-                                        if item.is_deprecated {
-                                            egui::Frame::none()
-                                                .fill(if app.dark_mode { Color32::from_rgb(69, 10, 10) } else { Color32::from_rgb(254, 226, 226) })
-                                                .rounding(3.0)
-                                                .inner_margin(egui::Margin::symmetric(4.0, 1.0))
-                                                .show(ui, |ui| {
-                                                    ui.label(RichText::new(crate::i18n::t(lang, "УСТАРЕЛО (EOL)", "DEPRECATED (EOL)")).small().strong().color(Color32::from_rgb(239, 68, 68)));
-                                                });
-                                        }
-
-                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            if !item.uninstall_string.is_empty() {
-                                                if ui.button(crate::i18n::t(lang, "🗑 Удалить", "🗑 Uninstall")).clicked() {
-                                                    runtime_to_uninstall = Some(item.uninstall_string.clone());
-                                                }
+                                    super::split_row(
+                                        ui,
+                                        |ui| {
+                                            if !item.uninstall_string.is_empty()
+                                                && ui.button(crate::i18n::t(lang, "🗑 Удалить", "🗑 Uninstall")).clicked()
+                                            {
+                                                runtime_to_uninstall = Some(item.uninstall_string.clone());
                                             }
                                             ui.label(RichText::new(format_size_lang(item.size_bytes, lang)).small().color(Color32::from_rgb(148, 163, 184)));
-                                        });
-                                    });
+                                        },
+                                        |ui| {
+                                            ui.horizontal(|ui| {
+                                                ui.label(RichText::new(format!("[{}]", item.arch)).strong().color(Color32::from_rgb(59, 130, 246)));
+
+                                                if item.is_deprecated {
+                                                    egui::Frame::none()
+                                                        .fill(if app.dark_mode { Color32::from_rgb(69, 10, 10) } else { Color32::from_rgb(254, 226, 226) })
+                                                        .rounding(3.0)
+                                                        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                                        .show(ui, |ui| {
+                                                            ui.label(RichText::new(crate::i18n::t(lang, "УСТАРЕЛО (EOL)", "DEPRECATED (EOL)")).small().strong().color(Color32::from_rgb(239, 68, 68)));
+                                                        });
+                                                }
+
+                                                ui.add(egui::Label::new(RichText::new(&item.display_name).strong()).truncate())
+                                                    .on_hover_text(&item.display_name);
+                                            });
+                                        },
+                                    );
                                     ui.separator();
                                 }
                                 ui.add_space(8.0);
@@ -678,17 +719,25 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                ui.label(RichText::new(crate::i18n::t(lang, "Совет: Visual C++ 2015–2022 является единой универсальной библиотекой.", "Tip: Visual C++ 2015-2022 is a unified binary-compatible runtime.")).small());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(crate::i18n::t(lang, "Совет: Visual C++ 2015–2022 является единой универсальной библиотекой.", "Tip: Visual C++ 2015-2022 is a unified binary-compatible runtime.")).small()).truncate());
+                    });
                 });
             });
-        });
+        },
+    );
 
-    if do_close || !is_open {
+    if do_close {
+        is_open = false;
+    }
+    super::sync_detachable_state("modal_runtime", &mut app.detached_modals, &mut app.runtime_modal_open, outcome);
+    if !is_open {
         app.runtime_modal_open = false;
+        app.detached_modals.remove("modal_runtime");
     }
 
     if let Some(uninst_str) = runtime_to_uninstall {
@@ -709,18 +758,19 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let mut pkg_to_upgrade: Option<String> = None;
     let mut pkg_to_uninstall: Option<String> = None;
 
-    egui::Window::new(crate::i18n::t(lang, "🚀 Менеджер пакетов и обновлений Winget", "🚀 Winget Package & Update Manager"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(true)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(760.0);
-            ui.set_height(480.0);
-
-            ui.heading(RichText::new(crate::i18n::t(lang, "🚀 Диспетчер пакетов Windows (Winget CLI)", "🚀 Windows Package Manager (Winget CLI)")).strong());
-            ui.add_space(4.0);
+    let is_detached = app.detached_modals.contains("modal_winget");
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_winget",
+        crate::i18n::t(lang, "🚀 Менеджер пакетов и обновлений Winget", "🚀 Winget Package & Update Manager"),
+        Some(crate::i18n::t(lang, "🚀 Диспетчер пакетов Windows (Winget CLI)", "🚀 Windows Package Manager (Winget CLI)")),
+        egui::vec2(760.0, 480.0),
+        egui::vec2(420.0, 300.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
                 "Интеграция с репозиторием Winget. Позволяет проверять наличие официальных обновлений установленных программ и производить их тихое удаление без открытия сторонних мастеров.",
@@ -740,22 +790,20 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             }
 
             // Top Action Bar
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let refresh_btn = egui::Button::new(crate::i18n::t(lang, "🔄 Обновить список пакетов Winget", "🔄 Refresh Winget package list"));
                 if ui.add_enabled(!app.winget_is_busy, refresh_btn).clicked() {
                     do_rescan = true;
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let updatable_count = app.winget_packages.iter().filter(|p| p.available_version.is_some()).count();
-                    let stats_text = format!(
-                        "{}: {} | {}: {}",
-                        crate::i18n::t(lang, "Всего", "Total"),
-                        app.winget_packages.len(),
-                        crate::i18n::t(lang, "Доступно обновлений", "Updates available"),
-                        updatable_count
-                    );
-                    ui.label(RichText::new(stats_text).strong());
-                });
+                let updatable_count = app.winget_packages.iter().filter(|p| p.available_version.is_some()).count();
+                let stats_text = format!(
+                    "{}: {} | {}: {}",
+                    crate::i18n::t(lang, "Всего", "Total"),
+                    app.winget_packages.len(),
+                    crate::i18n::t(lang, "Доступно обновлений", "Updates available"),
+                    updatable_count
+                );
+                ui.label(RichText::new(stats_text).strong());
             });
             ui.add_space(6.0);
 
@@ -772,7 +820,7 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         });
                     });
                 ui.add_space(6.0);
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                active_ctx.request_repaint_after(std::time::Duration::from_millis(100));
             }
 
             let list_bg = if app.dark_mode { Color32::from_rgb(18, 18, 20) } else { Color32::WHITE };
@@ -782,35 +830,18 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 .rounding(4.0)
                 .inner_margin(8.0)
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+                    let list_h = super::fill_scroll_height(ui, 54.0, 90.0);
+                    egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         if app.winget_packages.is_empty() {
                             ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
+                                ui.add_space(20.0);
                                 ui.label(RichText::new(crate::i18n::t(lang, "Пакеты Winget загружаются или Winget недоступен на этом ПК.", "Winget packages are loading or Winget is unavailable on this PC.")).color(Color32::from_rgb(148, 163, 184)));
                             });
                         } else {
                             for pkg in &app.winget_packages {
-                                ui.horizontal(|ui| {
-                                    ui.vertical(|ui| {
-                                        ui.horizontal(|ui| {
-                                            ui.label(RichText::new(&pkg.name).strong());
-                                            ui.label(RichText::new(format!("v{}", pkg.installed_version)).small().color(Color32::from_rgb(148, 163, 184)));
-
-                                            if let Some(avail) = &pkg.available_version {
-                                                egui::Frame::none()
-                                                    .fill(if app.dark_mode { Color32::from_rgb(20, 83, 45) } else { Color32::from_rgb(220, 252, 231) })
-                                                    .rounding(3.0)
-                                                    .inner_margin(egui::Margin::symmetric(4.0, 1.0))
-                                                    .show(ui, |ui| {
-                                                        let avail_text = format!("{} v{}", crate::i18n::t(lang, "⬆ Доступна", "⬆ Available"), avail);
-                                                        ui.label(RichText::new(avail_text).small().strong().color(Color32::from_rgb(22, 163, 74)));
-                                                    });
-                                            }
-                                        });
-                                        ui.label(RichText::new(&pkg.id).small().color(Color32::from_rgb(113, 113, 122)));
-                                    });
-
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                super::split_row(
+                                    ui,
+                                    |ui| {
                                         let uninst_btn = egui::Button::new(crate::i18n::t(lang, "🗑 Удалить (Winget)", "🗑 Uninstall (Winget)"));
                                         if ui.add_enabled(!app.winget_is_busy, uninst_btn).clicked() {
                                             pkg_to_uninstall = Some(pkg.id.clone());
@@ -822,8 +853,26 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                 pkg_to_upgrade = Some(pkg.id.clone());
                                             }
                                         }
-                                    });
-                                });
+                                    },
+                                    |ui| {
+                                        ui.add(egui::Label::new(RichText::new(&pkg.name).strong()).truncate())
+                                            .on_hover_text(&pkg.name);
+                                        ui.horizontal_wrapped(|ui| {
+                                            ui.label(RichText::new(&pkg.id).small().color(Color32::from_rgb(113, 113, 122)));
+                                            ui.label(RichText::new(format!("• v{}", pkg.installed_version)).small().color(Color32::from_rgb(148, 163, 184)));
+                                            if let Some(avail) = &pkg.available_version {
+                                                egui::Frame::none()
+                                                    .fill(if app.dark_mode { Color32::from_rgb(20, 83, 45) } else { Color32::from_rgb(220, 252, 231) })
+                                                    .rounding(3.0)
+                                                    .inner_margin(egui::Margin::symmetric(5.0, 1.0))
+                                                    .show(ui, |ui| {
+                                                        let avail_text = format!("{} v{}", crate::i18n::t(lang, "⬆ Доступна", "⬆ Available"), avail);
+                                                        ui.label(RichText::new(avail_text).small().strong().color(Color32::from_rgb(22, 163, 74)));
+                                                    });
+                                            }
+                                        });
+                                    },
+                                );
                                 ui.separator();
                             }
                         }
@@ -835,17 +884,25 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(6.0);
 
             ui.horizontal(|ui| {
-                ui.label(RichText::new(crate::i18n::t(lang, "Winget выполняет установку и удаление из проверенных манифестов.", "Winget installs and uninstalls packages from verified manifests.")).small());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
                         do_close = true;
                     }
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(crate::i18n::t(lang, "Winget выполняет установку и удаление из проверенных манифестов.", "Winget installs and uninstalls packages from verified manifests.")).small()).truncate());
+                    });
                 });
             });
-        });
+        },
+    );
 
-    if do_close || !is_open {
+    if do_close {
+        is_open = false;
+    }
+    super::sync_detachable_state("modal_winget", &mut app.detached_modals, &mut app.winget_modal_open, outcome);
+    if !is_open {
         app.winget_modal_open = false;
+        app.detached_modals.remove("modal_winget");
     }
 
     if do_rescan && !app.winget_is_busy {

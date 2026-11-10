@@ -9,15 +9,21 @@ pub fn render_update_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     }
 
     let lang = app.lang();
-    let mut is_open = true;
-    egui::Window::new(crate::i18n::t(lang, "🔄 Обновление PurgeCraft", "🔄 PurgeCraft Update"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(false)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(480.0);
+    let is_detached = app.detached_modals.contains("modal_update");
+    let mut should_close = false;
+
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_update",
+        crate::i18n::t(lang, "🔄 Обновление PurgeCraft", "🔄 PurgeCraft Update"),
+        None,
+        egui::vec2(480.0, 320.0),
+        egui::vec2(320.0, 200.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, _active_ctx| {
             ui.add_space(4.0);
 
             match &app.update_status {
@@ -62,13 +68,14 @@ pub fn render_update_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     ui.group(|ui| {
                         ui.label(RichText::new(crate::i18n::t(lang, "Описание изменений:", "Release notes:")).strong());
-                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                        let list_h = super::fill_scroll_height(ui, 56.0, 80.0);
+                        egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                             ui.label(&info.release_notes);
                         });
                     });
 
                     ui.add_space(8.0);
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         if ui.button(RichText::new(crate::i18n::t(lang, "📥 Скачать и установить сейчас", "📥 Download and install now")).strong().color(Color32::WHITE))
                             .on_hover_text(crate::i18n::t(lang, "Автоматически загрузить и обновить текущий исполняемый файл", "Automatically download and update the executable"))
                             .clicked()
@@ -108,7 +115,7 @@ pub fn render_update_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             }
                         }
                         if ui.button(crate::i18n::t(lang, "Позже", "Later")).clicked() {
-                            app.update_modal_open = false;
+                            should_close = true;
                         }
                     });
                 }
@@ -128,14 +135,16 @@ pub fn render_update_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             );
                         }
                         if ui.button(crate::i18n::t(lang, "Закрыть", "Close")).clicked() {
-                            app.update_modal_open = false;
+                            should_close = true;
                         }
                     });
                 }
             }
-        });
+        },
+    );
 
-    if !is_open {
+    if should_close {
         app.update_modal_open = false;
     }
+    super::sync_detachable_state("modal_update", &mut app.detached_modals, &mut app.update_modal_open, outcome);
 }

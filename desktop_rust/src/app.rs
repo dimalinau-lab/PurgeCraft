@@ -16,7 +16,7 @@ use crate::scanner::{
     RuntimeFamilyGroup, detect_runtime_duplicates,
     WingetAppItem, scan_winget_packages,
 };
-use crate::settings::{AppSettings, load_settings, is_windows_dark_mode};
+use crate::settings::{AppSettings, load_settings, save_settings, resolve_dark_mode};
 use crate::autoupdater;
 use crate::types::{
     WizardPhase, ActiveTab, SettingsTab, AppCategory, StartupFilter, TrackerStep,
@@ -25,6 +25,20 @@ use crate::types::{
 };
 use crate::tabs;
 use crate::modals;
+
+pub type WingetTaskMsg = (Result<String, String>, Option<Vec<WingetAppItem>>);
+
+#[derive(PartialEq, Clone)]
+pub struct AppFilterKey {
+    pub query: String,
+    pub category: AppCategory,
+    pub drive_filter: Option<char>,
+    pub sort_column: SortColumn,
+    pub sort_order: SortOrder,
+    pub highlight_recent: bool,
+    pub tree_updates_mode: String,
+    pub apps_generation: u64,
+}
 
 pub struct PurgeCraftApp {
     pub active_tab: ActiveTab,
@@ -49,7 +63,6 @@ pub struct PurgeCraftApp {
 
     // Real App Icon texture cache
     pub icon_textures: HashMap<String, Option<egui::TextureHandle>>,
-    pub brand_logo_tex: Option<egui::TextureHandle>,
 
     // Batch operations
     pub batch_selected: HashSet<String>, // set of app.id
@@ -122,7 +135,7 @@ pub struct PurgeCraftApp {
     pub tracker_snapshot_before: Option<SystemSnapshot>,
     pub tracker_traces: Vec<LeftoverTrace>,
     pub traced_apps: Vec<TracedApp>,
-    pub tracker_live_log: Vec<scanner::TrackerLiveMsg>,
+    pub tracker_live_log: std::collections::VecDeque<scanner::TrackerLiveMsg>,
     pub tracker_rx: Option<std::sync::mpsc::Receiver<scanner::TrackerLiveMsg>>,
     pub tracker_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     pub tracker_child: Option<std::process::Child>,
@@ -133,6 +146,9 @@ pub struct PurgeCraftApp {
     pub settings_tab: SettingsTab,
     pub settings: AppSettings,
     pub temp_settings: AppSettings,
+
+    // Detached modal windows (rendered in native OS viewports outside the main window)
+    pub detached_modals: HashSet<&'static str>,
 
     // Shader Cache Cleaner
     pub shader_modal_open: bool,
@@ -159,7 +175,7 @@ pub struct PurgeCraftApp {
     pub winget_modal_open: bool,
     pub winget_packages: Vec<WingetAppItem>,
     pub winget_msg: Option<String>,
-    pub winget_task_rx: Option<std::sync::mpsc::Receiver<(Result<String, String>, Option<Vec<WingetAppItem>>)>>,
+    pub winget_task_rx: Option<std::sync::mpsc::Receiver<WingetTaskMsg>>,
     pub winget_is_busy: bool,
     pub winget_busy_msg: String,
 
@@ -200,8 +216,13 @@ pub struct PurgeCraftApp {
     pub update_tx: std::sync::mpsc::Sender<autoupdater::UpdateStatus>,
     pub update_modal_open: bool,
 
-    // Responsive UI state
+    // Responsive UI state & render caches
     pub sidebar_open: bool,
+    pub apps_generation: u64,
+    pub applied_dark_mode: Option<bool>,
+    pub applied_text_scale: Option<f32>,
+    pub filter_cache_key: Option<AppFilterKey>,
+    pub cached_filtered_indices: Vec<usize>,
 }
 
 impl Default for PurgeCraftApp {
@@ -240,11 +261,7 @@ impl Default for PurgeCraftApp {
         let traced_apps = load_traced_apps();
         let settings = load_settings();
         let temp_settings = settings.clone();
-        let dark_mode = match settings.theme_mode.as_str() {
-            "light" => false,
-            "system" => is_windows_dark_mode(),
-            _ => true,
-        };
+        let dark_mode = resolve_dark_mode(&settings.theme_mode);
 
         let (update_tx, update_rx) = std::sync::mpsc::channel();
         if settings.check_updates {
@@ -270,7 +287,6 @@ impl Default for PurgeCraftApp {
             sort_column: SortColumn::Name,
             sort_order: SortOrder::Ascending,
             icon_textures: HashMap::new(),
-            brand_logo_tex: None,
             size_rx,
             size_tx,
             uwp_rx,
@@ -325,7 +341,7 @@ impl Default for PurgeCraftApp {
             tracker_snapshot_before: None,
             tracker_traces: Vec::new(),
             traced_apps,
-            tracker_live_log: Vec::new(),
+            tracker_live_log: std::collections::VecDeque::new(),
             tracker_rx: None,
             tracker_stop_tx: None,
             tracker_child: None,
@@ -334,6 +350,7 @@ impl Default for PurgeCraftApp {
             settings_tab: SettingsTab::General,
             settings,
             temp_settings,
+            detached_modals: HashSet::new(),
             shader_modal_open: false,
             shader_locations: Vec::new(),
             shader_clean_msg: None,
@@ -379,11 +396,143 @@ impl Default for PurgeCraftApp {
             update_tx,
             update_modal_open: false,
             sidebar_open: true,
+            apps_generation: 0,
+            applied_dark_mode: None,
+            applied_text_scale: None,
+            filter_cache_key: None,
+            cached_filtered_indices: Vec::new(),
         }
     }
 }
 
+pub fn filter_and_sort_app_indices(apps: &[InstalledApp], key: &AppFilterKey) -> Vec<usize> {
+    let q = &key.query;
+    let hide_updates = key.tree_updates_mode == "hidden";
+    let mut indices: Vec<usize> = apps
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| {
+            let cat_match = match key.category {
+                AppCategory::All => true,
+                AppCategory::UserApps => !a.is_system_component && !a.is_uwp && a.source_badge != "[Portable]",
+                AppCategory::System => a.is_system_component,
+                AppCategory::StoreApps => a.is_uwp,
+                AppCategory::Portable => a.source_badge == "[Portable]",
+                AppCategory::Arch64 => a.is_64bit,
+                AppCategory::Arch32 => !a.is_64bit,
+            };
+            if !cat_match {
+                return false;
+            }
+            if let Some(target_drive) = key.drive_filter {
+                if scanner::get_app_drive_letter(a) != target_drive {
+                    return false;
+                }
+            }
+            if hide_updates {
+                let name_low = a.name.to_lowercase();
+                if a.name.starts_with("KB")
+                    || name_low.contains("hotfix")
+                    || name_low.contains("update for")
+                    || name_low.contains("обновление для")
+                {
+                    return false;
+                }
+            }
+            if q.is_empty() {
+                true
+            } else {
+                a.name.to_lowercase().contains(q)
+                    || a.publisher.to_lowercase().contains(q)
+                    || a.source_badge.to_lowercase().contains(q)
+            }
+        })
+        .map(|(i, _)| i)
+        .collect();
+
+    let sort_col = key.sort_column;
+    let sort_ord = key.sort_order;
+    let highlight_recent = key.highlight_recent;
+
+    // Precompute sort keys once for string columns so sorting is O(N) lowercase allocs instead of O(N log N).
+    let sort_by_str_key = |indices: &mut Vec<usize>, extract: fn(&InstalledApp) -> &str| {
+        let keys: Vec<(bool, String)> = indices
+            .iter()
+            .map(|&i| (!apps[i].is_new, extract(&apps[i]).to_lowercase()))
+            .collect();
+        let mut order: Vec<usize> = (0..indices.len()).collect();
+        order.sort_by(|&ia, &ib| {
+            if highlight_recent && keys[ia].0 != keys[ib].0 {
+                return keys[ia].0.cmp(&keys[ib].0);
+            }
+            let cmp = keys[ia].1.cmp(&keys[ib].1);
+            if sort_ord == SortOrder::Descending { cmp.reverse() } else { cmp }
+        });
+        *indices = order.into_iter().map(|o| indices[o]).collect();
+    };
+
+    match sort_col {
+        SortColumn::Name => sort_by_str_key(&mut indices, |a| &a.name),
+        SortColumn::Publisher => sort_by_str_key(&mut indices, |a| &a.publisher),
+        _ => {
+            indices.sort_by(|&a_idx, &b_idx| {
+                let a = &apps[a_idx];
+                let b = &apps[b_idx];
+                if highlight_recent && a.is_new != b.is_new {
+                    return if a.is_new { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater };
+                }
+                let cmp = match sort_col {
+                    SortColumn::Size => a.size_bytes.cmp(&b.size_bytes),
+                    SortColumn::Date => a.install_date.cmp(&b.install_date),
+                    SortColumn::AppType => {
+                        let a_type = if a.is_uwp { 2 } else if a.is_64bit { 1 } else { 0 };
+                        let b_type = if b.is_uwp { 2 } else if b.is_64bit { 1 } else { 0 };
+                        a_type.cmp(&b_type)
+                    }
+                    SortColumn::Name | SortColumn::Publisher => unreachable!(),
+                };
+                if sort_ord == SortOrder::Descending { cmp.reverse() } else { cmp }
+            });
+        }
+    }
+
+    indices
+}
+
 impl PurgeCraftApp {
+    pub fn bump_apps_generation(&mut self) {
+        self.apps_generation = self.apps_generation.wrapping_add(1);
+    }
+
+    pub fn remove_app_from_list(&mut self, id: &str, name: &str) {
+        let id_low = id.to_lowercase();
+        let name_low = name.to_lowercase();
+        self.recently_uninstalled.insert(id_low.clone());
+        self.recently_uninstalled.insert(name_low.clone());
+        self.apps.retain(|a| a.id.to_lowercase() != id_low && a.name.to_lowercase() != name_low);
+        self.bump_apps_generation();
+    }
+
+    pub fn ensure_filtered_indices(&mut self) -> Vec<usize> {
+        let key = AppFilterKey {
+            query: self.search_query.to_lowercase(),
+            category: self.category,
+            drive_filter: self.drive_filter,
+            sort_column: self.sort_column,
+            sort_order: self.sort_order,
+            highlight_recent: self.settings.highlight_recent,
+            tree_updates_mode: self.settings.tree_updates_mode.clone(),
+            apps_generation: self.apps_generation,
+        };
+        if self.filter_cache_key.as_ref() == Some(&key) {
+            return self.cached_filtered_indices.clone();
+        }
+        let indices = filter_and_sort_app_indices(&self.apps, &key);
+        self.filter_cache_key = Some(key);
+        self.cached_filtered_indices = indices.clone();
+        indices
+    }
+
     pub fn start_system_clean_scan(&mut self) {
         self.system_clean_is_busy = true;
         self.system_clean_busy_msg = "Сканирование системы...".to_string();
@@ -431,7 +580,7 @@ impl PurgeCraftApp {
     }
 
     pub fn lang(&self) -> crate::i18n::Language {
-        crate::i18n::Language::from_str(&self.settings.language)
+        crate::i18n::Language::from_label(&self.settings.language)
     }
 
     pub fn any_modal_open(&self) -> bool {
@@ -483,6 +632,7 @@ impl PurgeCraftApp {
         apps.retain(|a| !self.recently_uninstalled.contains(&a.id.to_lowercase()) && !self.recently_uninstalled.contains(&a.name.to_lowercase()));
         self.new_apps_count = apply_known_apps(&mut apps);
         self.apps = apps;
+        self.bump_apps_generation();
         self.traced_apps = load_traced_apps();
         spawn_size_calculator(&self.apps, self.size_tx.clone());
         let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
@@ -532,11 +682,7 @@ impl PurgeCraftApp {
         } else if !app.registry_path.is_empty() {
             let _ = scanner::delete_registry_key_by_path(&app.registry_path);
         }
-        let id_low = app.id.to_lowercase();
-        let name_low = app.name.to_lowercase();
-        self.recently_uninstalled.insert(id_low.clone());
-        self.recently_uninstalled.insert(name_low.clone());
-        self.apps.retain(|a| a.id.to_lowercase() != id_low && a.name.to_lowercase() != name_low);
+        self.remove_app_from_list(&app.id, &app.name);
         self.status_msg = format!("Запись «{}» успешно удалена из списка Windows.", app.name);
         self.refresh_data();
     }
@@ -579,12 +725,23 @@ impl PurgeCraftApp {
         self.start_wizard_scan(app);
     }
 
+    pub fn push_tracker_log(&mut self, msg: scanner::TrackerLiveMsg) {
+        Self::push_bounded_tracker_log(&mut self.tracker_live_log, msg);
+    }
+
+    fn push_bounded_tracker_log(
+        log: &mut std::collections::VecDeque<scanner::TrackerLiveMsg>,
+        msg: scanner::TrackerLiveMsg,
+    ) {
+        const MAX_TRACKER_LOG_LINES: usize = 10_000;
+        if log.len() >= MAX_TRACKER_LOG_LINES {
+            log.pop_front();
+        }
+        log.push_back(msg);
+    }
+
     pub fn start_wizard_scan(&mut self, app: InstalledApp) {
-        let id_low = app.id.to_lowercase();
-        let name_low = app.name.to_lowercase();
-        self.recently_uninstalled.insert(id_low.clone());
-        self.recently_uninstalled.insert(name_low.clone());
-        self.apps.retain(|a| a.id.to_lowercase() != id_low && a.name.to_lowercase() != name_low);
+        self.remove_app_from_list(&app.id, &app.name);
         if let Some(idx) = self.selected_app_idx {
             if idx >= self.apps.len() {
                 self.selected_app_idx = if !self.apps.is_empty() { Some(0) } else { None };
@@ -598,7 +755,11 @@ impl PurgeCraftApp {
         self.wizard_traces.clear();
         self.wizard_report = None;
         self.wizard_xml_status = None;
-        self.wizard_scan_rx = Some(spawn_scan_leftovers_stream(app, self.traced_apps.clone()));
+        self.wizard_scan_rx = Some(spawn_scan_leftovers_stream(
+            app,
+            self.traced_apps.clone(),
+            self.apps.clone(),
+        ));
         self.wizard_open = true;
     }
 
@@ -688,13 +849,10 @@ impl PurgeCraftApp {
 
 impl eframe::App for PurgeCraftApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Apply text zoom factor from settings
-        ctx.set_zoom_factor(self.settings.text_scale);
-
-        if self.brand_logo_tex.is_none() {
-            let brand_bytes = include_bytes!("icon_64.rgba");
-            let img = egui::ColorImage::from_rgba_unmultiplied([64, 64], brand_bytes);
-            self.brand_logo_tex = Some(ctx.load_texture("brand_logo", img, egui::TextureOptions::LINEAR));
+        // Apply text zoom factor only when changed
+        if self.applied_text_scale != Some(self.settings.text_scale) {
+            ctx.set_zoom_factor(self.settings.text_scale);
+            self.applied_text_scale = Some(self.settings.text_scale);
         }
 
         // Drain asynchronous background size calculations
@@ -708,6 +866,9 @@ impl eframe::App for PurgeCraftApp {
             }
         }
         if size_updated {
+            if self.sort_column == SortColumn::Size {
+                self.bump_apps_generation();
+            }
             let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
             self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
             ctx.request_repaint();
@@ -726,7 +887,8 @@ impl eframe::App for PurgeCraftApp {
                 }
             }
             self.new_apps_count = apply_known_apps(&mut self.apps);
-            self.apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            self.apps.sort_by_key(|a| a.name.to_lowercase());
+            self.bump_apps_generation();
             let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
             self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
             ctx.request_repaint();
@@ -774,6 +936,7 @@ impl eframe::App for PurgeCraftApp {
                 }
                 self.portable_rx = None;
                 self.is_refreshing = false;
+                self.bump_apps_generation();
                 let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
                 self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
                 ctx.request_repaint();
@@ -863,20 +1026,13 @@ impl eframe::App for PurgeCraftApp {
         // Poll native uninstaller process completion
         if self.uninstall_waiting_open {
             if let Some(child) = &mut self.uninstall_child {
-                match child.try_wait() {
-                    Ok(Some(_status)) => {
-                        self.uninstall_child = None;
-                        self.uninstall_waiting_open = false;
-                        if let Some(app) = self.uninstall_waiting_app.take() {
-                            let id_low = app.id.to_lowercase();
-                            let name_low = app.name.to_lowercase();
-                            self.recently_uninstalled.insert(id_low.clone());
-                            self.recently_uninstalled.insert(name_low.clone());
-                            self.apps.retain(|a| a.id.to_lowercase() != id_low && a.name.to_lowercase() != name_low);
-                            self.start_wizard_scan(app);
-                        }
+                if let Ok(Some(_status)) = child.try_wait() {
+                    self.uninstall_child = None;
+                    self.uninstall_waiting_open = false;
+                    if let Some(app) = self.uninstall_waiting_app.take() {
+                        self.remove_app_from_list(&app.id, &app.name);
+                        self.start_wizard_scan(app);
                     }
-                    _ => {}
                 }
             }
             ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -925,12 +1081,8 @@ impl eframe::App for PurgeCraftApp {
                         self.wizard_phase = WizardPhase::Finished;
                         self.wizard_delete_rx = None;
                         self.batch_selected.clear();
-                        if let Some(app) = &self.wizard_target_app {
-                            let id_low = app.id.to_lowercase();
-                            let name_low = app.name.to_lowercase();
-                            self.recently_uninstalled.insert(id_low.clone());
-                            self.recently_uninstalled.insert(name_low.clone());
-                            self.apps.retain(|a| a.id.to_lowercase() != id_low && a.name.to_lowercase() != name_low);
+                        if let Some(app) = self.wizard_target_app.clone() {
+                            self.remove_app_from_list(&app.id, &app.name);
                         }
                         self.refresh_data();
 
@@ -948,26 +1100,28 @@ impl eframe::App for PurgeCraftApp {
         // Drain Realtime Install Tracker Log Stream
         if let Some(rx) = &self.tracker_rx {
             while let Ok(msg) = rx.try_recv() {
-                self.tracker_live_log.push(msg);
+                Self::push_bounded_tracker_log(&mut self.tracker_live_log, msg);
             }
             if let Some(child) = &mut self.tracker_child {
-                match child.try_wait() {
-                    Ok(Some(_status)) => {
-                        self.tracker_child = None;
-                        self.tracker_process_finished = true;
-                        self.tracker_live_log.push(scanner::TrackerLiveMsg {
+                if let Ok(Some(_status)) = child.try_wait() {
+                    self.tracker_child = None;
+                    self.tracker_process_finished = true;
+                    Self::push_bounded_tracker_log(
+                        &mut self.tracker_live_log,
+                        scanner::TrackerLiveMsg {
                             time: chrono::Local::now().format("%H:%M:%S").to_string(),
                             action: String::new(),
                             path: "Процесс инсталлятора завершен. Нажмите 'Установить и следить' для анализа.".to_string(),
-                        });
-                    }
-                    _ => {}
+                        },
+                    );
                 }
             }
-            ctx.request_repaint_after(std::time::Duration::from_millis(80));
+            let wait_ms = if self.tracker_process_finished { 250 } else { 120 };
+            ctx.request_repaint_after(std::time::Duration::from_millis(wait_ms));
         }
 
         let lang = self.lang();
+        let wants_kb = ctx.wants_keyboard_input();
 
         // Global Keyboard Shortcuts
         ctx.input(|i| {
@@ -1000,44 +1154,45 @@ impl eframe::App for PurgeCraftApp {
                 }
             }
 
-            // Delete - uninstall selected app
-            if i.key_pressed(egui::Key::Delete) && !self.any_modal_open() {
-                if self.active_tab == ActiveTab::Uninstaller {
-                    if let Some(idx) = self.selected_app_idx {
-                        if let Some(target_app) = self.apps.get(idx).cloned() {
-                            self.start_uninstall(target_app);
-                        }
+            // Delete - uninstall selected app (only when no text input has keyboard focus)
+            if i.key_pressed(egui::Key::Delete) && !wants_kb && !self.any_modal_open() && self.active_tab == ActiveTab::Uninstaller {
+                if let Some(idx) = self.selected_app_idx {
+                    if let Some(target_app) = self.apps.get(idx).cloned() {
+                        self.start_uninstall(target_app);
                     }
                 }
             }
         });
 
-        // True Dark Theme (neutral graphite/charcoal, ZERO BLUE) vs Windows Explorer Light
-        if self.dark_mode {
-            let mut visuals = egui::Visuals::dark();
-            visuals.window_fill = Color32::from_rgb(18, 18, 20); // Neutral dark black/charcoal
-            visuals.panel_fill = Color32::from_rgb(18, 18, 20);
-            visuals.faint_bg_color = Color32::from_rgb(26, 26, 30);
-            visuals.extreme_bg_color = Color32::from_rgb(12, 12, 14);
-            visuals.override_text_color = Some(Color32::from_rgb(244, 244, 245));
-            visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(18, 18, 20);
-            visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(38, 38, 42));
-            visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 26, 30);
-            visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(42, 42, 48));
-            visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 38, 45);
-            visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(63, 63, 70));
-            visuals.widgets.active.bg_fill = Color32::from_rgb(48, 52, 60);
-            visuals.selection.bg_fill = Color32::from_rgb(45, 48, 56);
-            visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_rgb(90, 95, 105));
-            ctx.set_visuals(visuals);
-        } else {
-            let mut visuals = egui::Visuals::light();
-            visuals.window_fill = Color32::from_rgb(240, 242, 245);
-            visuals.panel_fill = Color32::from_rgb(240, 242, 245);
-            visuals.faint_bg_color = Color32::from_rgb(248, 250, 252);
-            visuals.extreme_bg_color = Color32::WHITE;
-            visuals.override_text_color = Some(Color32::from_rgb(30, 41, 59));
-            ctx.set_visuals(visuals);
+        // Apply theme visuals only when dark_mode changes (avoids rebuilding Visuals every frame)
+        if self.applied_dark_mode != Some(self.dark_mode) {
+            if self.dark_mode {
+                let mut visuals = egui::Visuals::dark();
+                visuals.window_fill = Color32::from_rgb(18, 18, 20); // Neutral dark black/charcoal
+                visuals.panel_fill = Color32::from_rgb(18, 18, 20);
+                visuals.faint_bg_color = Color32::from_rgb(26, 26, 30);
+                visuals.extreme_bg_color = Color32::from_rgb(12, 12, 14);
+                visuals.override_text_color = Some(Color32::from_rgb(244, 244, 245));
+                visuals.widgets.noninteractive.bg_fill = Color32::from_rgb(18, 18, 20);
+                visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(38, 38, 42));
+                visuals.widgets.inactive.bg_fill = Color32::from_rgb(26, 26, 30);
+                visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(42, 42, 48));
+                visuals.widgets.hovered.bg_fill = Color32::from_rgb(38, 38, 45);
+                visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(63, 63, 70));
+                visuals.widgets.active.bg_fill = Color32::from_rgb(48, 52, 60);
+                visuals.selection.bg_fill = Color32::from_rgb(45, 48, 56);
+                visuals.selection.stroke = Stroke::new(1.0_f32, Color32::from_rgb(90, 95, 105));
+                ctx.set_visuals(visuals);
+            } else {
+                let mut visuals = egui::Visuals::light();
+                visuals.window_fill = Color32::from_rgb(240, 242, 245);
+                visuals.panel_fill = Color32::from_rgb(240, 242, 245);
+                visuals.faint_bg_color = Color32::from_rgb(248, 250, 252);
+                visuals.extreme_bg_color = Color32::WHITE;
+                visuals.override_text_color = Some(Color32::from_rgb(30, 41, 59));
+                ctx.set_visuals(visuals);
+            }
+            self.applied_dark_mode = Some(self.dark_mode);
         }
 
         // 1. Menu Bar (MFC / Win32 style)
@@ -1093,11 +1248,12 @@ impl eframe::App for PurgeCraftApp {
                                 }
                                 ui.close_menu();
                             }
-                            if !app.is_uwp && !app.registry_path.is_empty() {
-                                if ui.button(crate::i18n::t(lang, "🗄 Запись в реестре", "🗄 Registry Entry")).clicked() {
-                                    jump_to_regedit(&app.registry_path);
-                                    ui.close_menu();
-                                }
+                            if !app.is_uwp
+                                && !app.registry_path.is_empty()
+                                && ui.button(crate::i18n::t(lang, "🗄 Запись в реестре", "🗄 Registry Entry")).clicked()
+                            {
+                                jump_to_regedit(&app.registry_path);
+                                ui.close_menu();
                             }
                             if ui.button(crate::i18n::t(lang, "🌐 Искать в Google", "🌐 Search on Google")).clicked() {
                                 let url = format!("https://www.google.com/search?q={}+{}", app.name, app.publisher);
@@ -1123,15 +1279,13 @@ impl eframe::App for PurgeCraftApp {
                     };
                     if ui.button(theme_menu_label).clicked() {
                         self.dark_mode = !self.dark_mode;
+                        self.settings.theme_mode = if self.dark_mode { "dark" } else { "light" }.to_string();
+                        save_settings(&self.settings);
                         ui.close_menu();
                     }
                 });
 
                 ui.menu_button(crate::i18n::menu_help(lang), |ui| {
-                    ui.label("PurgeCraft — Нативный деинсталлятор для Windows (Pure Rust)");
-                    ui.label("100% чистая реализация по Win32 API");
-                    ui.label("Поддержка Win32, UWP/Store и пакетного удаления");
-                    ui.separator();
                     if ui.button(crate::i18n::menu_check_updates(lang)).clicked() {
                         autoupdater::check_for_updates_async(
                             self.settings.github_repo.clone(),
@@ -1166,12 +1320,11 @@ impl eframe::App for PurgeCraftApp {
                             self.update_modal_open = true;
                         }
                     }
-                    autoupdater::UpdateStatus::ReadyToRestart => {
+                    autoupdater::UpdateStatus::ReadyToRestart
                         if ui.button(RichText::new(crate::i18n::t(lang, "🚀 Перезапустить для обновления", "🚀 Restart to update")).color(Color32::from_rgb(34, 197, 94)).strong())
-                            .clicked()
-                        {
-                            self.update_modal_open = true;
-                        }
+                            .clicked() =>
+                    {
+                        self.update_modal_open = true;
                     }
                     _ => {}
                 }
@@ -1189,18 +1342,6 @@ impl eframe::App for PurgeCraftApp {
                     self.sidebar_open = !self.sidebar_open;
                 }
                 ui.separator();
-
-                let logo_color = if self.dark_mode {
-                    Color32::from_rgb(244, 244, 245)
-                } else {
-                    Color32::from_rgb(37, 99, 235)
-                };
-                if let Some(ref logo) = self.brand_logo_tex {
-                    ui.image((logo.id(), egui::vec2(20.0, 20.0)));
-                    ui.add_space(2.0);
-                }
-                ui.heading(RichText::new("PurgeCraft").color(logo_color).strong().size(16.0));
-                ui.add_space(6.0);
 
                 // Core Mode: Деинсталлятор
                 let uninst_active = self.active_tab == ActiveTab::Uninstaller;
@@ -1346,31 +1487,15 @@ impl eframe::App for PurgeCraftApp {
                     }
                 });
 
-                // Right aligned search and compact theme toggle
+                // Right aligned search
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let theme_icon = if self.dark_mode { "☀" } else { "🌙" };
-                    let theme_tip = if self.dark_mode {
-                        crate::i18n::t(lang, "Переключить на светлую тему", "Switch to light theme")
-                    } else {
-                        crate::i18n::t(lang, "Переключить на темную тему", "Switch to dark theme")
-                    };
-                    if ui.button(theme_icon).on_hover_text(theme_tip).clicked() {
-                        self.dark_mode = !self.dark_mode;
-                    }
-
-                    if !self.search_query.is_empty() {
-                        let clear_tip = crate::i18n::t(lang, "Очистить поиск (Esc)", "Clear search (Esc)");
-                        if ui.button("✕").on_hover_text(clear_tip).clicked() {
-                            self.search_query.clear();
-                        }
-                    }
-
-                    let search_w = (ui.available_width() - 24.0).clamp(100.0, 180.0);
+                    let search_w = (ui.available_width() - 28.0).clamp(100.0, 200.0);
                     let search_hint = crate::i18n::t(lang, "Поиск... (Ctrl+F)", "Search... (Ctrl+F)");
                     let search_box = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
+                            .id(egui::Id::new("toolbar_search_input"))
                             .hint_text(search_hint)
-                            .desired_width(search_w)
+                            .desired_width(search_w),
                     );
                     if self.focus_search_requested {
                         search_box.request_focus();
@@ -1379,7 +1504,15 @@ impl eframe::App for PurgeCraftApp {
                     if search_box.changed() {
                         self.selected_app_idx = None;
                     }
-                    ui.label("🔍");
+                    if !self.search_query.is_empty() {
+                        let clear_tip = crate::i18n::t(lang, "Очистить поиск (Esc)", "Clear search (Esc)");
+                        if ui.button("✕").on_hover_text(clear_tip).clicked() {
+                            self.search_query.clear();
+                            search_box.request_focus();
+                        }
+                    } else {
+                        ui.label("🔍");
+                    }
                 });
             });
             ui.add_space(4.0);
@@ -1578,6 +1711,7 @@ impl eframe::App for PurgeCraftApp {
                         for a in &mut self.apps {
                             a.is_new = false;
                         }
+                        self.bump_apps_generation();
                         self.new_apps_count = 0;
                         self.status_msg = crate::i18n::t(lang, "Все отметки «Новое» успешно сняты.", "All \"New\" marks cleared successfully.").to_string();
                     }
@@ -1596,5 +1730,76 @@ impl eframe::App for PurgeCraftApp {
 
         // 6. Modals (Wizard, Force Removal, Batch Queue, Batch Force, Tools, Settings, Updates)
         self.render_modals(ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_app(id: &str, name: &str, pub_name: &str, size: u64, is_new: bool, is_sys: bool) -> InstalledApp {
+        InstalledApp {
+            id: id.to_string(),
+            name: name.to_string(),
+            version: "1.0".to_string(),
+            publisher: pub_name.to_string(),
+            install_date: "20261110".to_string(),
+            size_bytes: size,
+            install_location: r"C:\Apps\Sample".to_string(),
+            uninstall_string: String::new(),
+            registry_path: String::new(),
+            is_64bit: true,
+            is_system_component: is_sys,
+            is_uwp: false,
+            package_full_name: String::new(),
+            display_icon: String::new(),
+            is_new,
+            source_badge: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_filter_and_sort_app_indices_categories_and_recent() {
+        let apps = vec![
+            sample_app("1", "Zebra", "Acme", 100, false, false),
+            sample_app("2", "Alpha", "Beta", 500, true, false),
+            sample_app("3", "KB500123", "Microsoft", 200, false, true),
+        ];
+
+        let key = AppFilterKey {
+            query: String::new(),
+            category: AppCategory::UserApps,
+            drive_filter: None,
+            sort_column: SortColumn::Name,
+            sort_order: SortOrder::Ascending,
+            highlight_recent: true,
+            tree_updates_mode: "hidden".to_string(),
+            apps_generation: 0,
+        };
+        let res = filter_and_sort_app_indices(&apps, &key);
+        // "Alpha" (is_new=true) comes before "Zebra", and KB500123 (system + hidden update) is excluded
+        assert_eq!(res, vec![1, 0]);
+    }
+
+    #[test]
+    fn test_filter_and_sort_app_indices_search_and_size_desc() {
+        let apps = vec![
+            sample_app("1", "Obsidian", "Dynalist", 100, false, false),
+            sample_app("2", "OBS Studio", "OBS", 900, false, false),
+            sample_app("3", "Firefox", "Mozilla", 300, false, false),
+        ];
+
+        let key = AppFilterKey {
+            query: "obs".to_string(),
+            category: AppCategory::All,
+            drive_filter: None,
+            sort_column: SortColumn::Size,
+            sort_order: SortOrder::Descending,
+            highlight_recent: false,
+            tree_updates_mode: "collapsed".to_string(),
+            apps_generation: 0,
+        };
+        let res = filter_and_sort_app_indices(&apps, &key);
+        assert_eq!(res, vec![1, 0]);
     }
 }

@@ -1,7 +1,7 @@
 use eframe::egui::{self, Color32, RichText, Vec2, Stroke};
 use crate::app::PurgeCraftApp;
 use crate::types::SettingsTab;
-use crate::settings::{save_settings, is_windows_dark_mode};
+use crate::settings::{save_settings, resolve_dark_mode};
 use crate::autoupdater;
 
 pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
@@ -9,21 +9,23 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         return;
     }
 
-    let lang = crate::i18n::Language::from_str(&app.temp_settings.language);
-    let mut is_open = true;
+    let lang = crate::i18n::Language::from_label(&app.temp_settings.language);
     let mut do_save = false;
     let mut do_cancel = false;
+    let is_detached = app.detached_modals.contains("modal_settings");
 
-    egui::Window::new(crate::i18n::t(lang, "⚙ Настройки", "⚙ Settings"))
-        .open(&mut is_open)
-        .collapsible(false)
-        .resizable(false)
-        .pivot(egui::Align2::CENTER_CENTER)
-        .default_pos(ctx.screen_rect().center())
-        .show(ctx, |ui| {
-            ui.set_width(520.0);
-            ui.set_height(410.0);
-
+    let outcome = super::show_detachable_window(
+        ctx,
+        "modal_settings",
+        crate::i18n::t(lang, "⚙ Настройки", "⚙ Settings"),
+        None,
+        egui::vec2(520.0, 405.0),
+        egui::vec2(360.0, 300.0),
+        true,
+        is_detached,
+        app.dark_mode,
+        lang,
+        |ui, active_ctx| {
             // 1. Top Tab Bar
             ui.horizontal(|ui| {
                 let tab_btn = |ui: &mut egui::Ui, is_sel: bool, icon: &str, label: &str| -> egui::Response {
@@ -40,7 +42,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             if app.dark_mode { Color32::from_rgb(161, 161, 170) } else { Color32::from_rgb(71, 85, 105) },
                         )
                     };
-                    let tab_w = ((ui.available_width() - 12.0) / 3.0).floor().max(100.0);
+                    let tab_w = ((ui.available_width() - 12.0) / 3.0).floor().max(75.0);
                     let btn = egui::Button::new(
                         RichText::new(format!("{} {}", icon, label)).strong().color(text_color)
                     )
@@ -70,7 +72,11 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             ui.add_space(8.0);
 
             // 2. Tab Contents
-            egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
+            let scroll_h = super::fill_scroll_height(ui, 56.0, 100.0);
+            egui::ScrollArea::vertical()
+                .max_height(scroll_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
                 match app.settings_tab {
                     SettingsTab::General => {
                         let uac_label = crate::i18n::t(
@@ -119,7 +125,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             ui.add_space(20.0);
                             let repo_label = crate::i18n::t(lang, "Репозиторий GitHub:", "GitHub Repository:");
                             ui.label(repo_label);
-                            ui.add(egui::TextEdit::singleline(&mut app.temp_settings.github_repo).desired_width(160.0));
+                            ui.add(egui::TextEdit::singleline(&mut app.temp_settings.github_repo).desired_width(185.0));
                             let check_btn_label = crate::i18n::t(lang, "🔍 Проверить сейчас", "🔍 Check now");
                             if ui.button(check_btn_label).clicked() {
                                 autoupdater::check_for_updates_async(
@@ -174,20 +180,42 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         ui.checkbox(&mut app.temp_settings.mark_32bit, crate::i18n::t(lang, "Помечать 32-битные приложения", "Mark 32-bit applications"));
 
                         ui.add_space(12.0);
-                        ui.label(RichText::new(crate::i18n::t(lang, "Цветовая схема", "Color Scheme")).heading().size(14.0));
-                        let theme_label = match app.temp_settings.theme_mode.as_str() {
-                            "system" => crate::i18n::t(lang, "Соответствовать цветовой схеме Windows", "Match Windows theme"),
-                            "light" => crate::i18n::t(lang, "Светлая", "Light"),
-                            _ => crate::i18n::t(lang, "Темная", "Dark"),
-                        };
-                        egui::ComboBox::from_id_salt("settings_theme")
-                            .selected_text(theme_label)
-                            .width(260.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut app.temp_settings.theme_mode, "system".to_string(), crate::i18n::t(lang, "Соответствовать цветовой схеме Windows", "Match Windows theme"));
-                                ui.selectable_value(&mut app.temp_settings.theme_mode, "dark".to_string(), crate::i18n::t(lang, "Темная", "Dark"));
-                                ui.selectable_value(&mut app.temp_settings.theme_mode, "light".to_string(), crate::i18n::t(lang, "Светлая", "Light"));
-                            });
+                        ui.label(RichText::new(crate::i18n::t(lang, "Тема и цветовая схема", "Theme & Color Scheme")).heading().size(14.0));
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            let options = [
+                                ("dark", crate::i18n::t(lang, "🌙 Темная", "🌙 Dark")),
+                                ("light", crate::i18n::t(lang, "☀ Светлая", "☀ Light")),
+                                ("system", crate::i18n::t(lang, "🖥 Системная", "🖥 System")),
+                            ];
+                            for (mode, label) in options {
+                                let is_sel = app.temp_settings.theme_mode == mode
+                                    || (mode == "dark"
+                                        && app.temp_settings.theme_mode != "light"
+                                        && app.temp_settings.theme_mode != "system");
+                                let (fill, stroke, text_col) = if is_sel {
+                                    (
+                                        if app.dark_mode { Color32::from_rgb(37, 99, 235) } else { Color32::from_rgb(2, 132, 199) },
+                                        Stroke::new(1.0_f32, if app.dark_mode { Color32::from_rgb(96, 165, 250) } else { Color32::from_rgb(2, 132, 199) }),
+                                        Color32::WHITE,
+                                    )
+                                } else {
+                                    (
+                                        if app.dark_mode { Color32::from_rgb(32, 32, 38) } else { Color32::from_rgb(241, 245, 249) },
+                                        Stroke::new(1.0_f32, if app.dark_mode { Color32::from_rgb(63, 63, 70) } else { Color32::from_rgb(203, 213, 225) }),
+                                        if app.dark_mode { Color32::from_rgb(212, 212, 216) } else { Color32::from_rgb(51, 65, 85) },
+                                    )
+                                };
+                                let btn = egui::Button::new(RichText::new(label).strong().color(text_col))
+                                    .fill(fill)
+                                    .stroke(stroke)
+                                    .min_size(Vec2::new(110.0, 28.0));
+                                if ui.add(btn).clicked() {
+                                    app.temp_settings.theme_mode = mode.to_string();
+                                    app.dark_mode = resolve_dark_mode(mode);
+                                }
+                            }
+                        });
 
                         ui.add_space(12.0);
                         ui.label(RichText::new(crate::i18n::t(lang, "Масштаб и размер текста", "Text Scale and Size")).heading().size(14.0));
@@ -199,19 +227,19 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 .width(180.0)
                                 .show_ui(ui, |ui| {
                                     if ui.selectable_value(&mut app.temp_settings.text_scale, 1.0, crate::i18n::t(lang, "100% (Стандартный)", "100% (Default)")).clicked() {
-                                        ctx.set_zoom_factor(1.0);
+                                        active_ctx.set_zoom_factor(1.0);
                                     }
                                     if ui.selectable_value(&mut app.temp_settings.text_scale, 1.15, crate::i18n::t(lang, "115% (Рекомендуемый)", "115% (Recommended)")).clicked() {
-                                        ctx.set_zoom_factor(1.15);
+                                        active_ctx.set_zoom_factor(1.15);
                                     }
                                     if ui.selectable_value(&mut app.temp_settings.text_scale, 1.25, crate::i18n::t(lang, "125% (Увеличенный)", "125% (Large)")).clicked() {
-                                        ctx.set_zoom_factor(1.25);
+                                        active_ctx.set_zoom_factor(1.25);
                                     }
                                     if ui.selectable_value(&mut app.temp_settings.text_scale, 1.35, crate::i18n::t(lang, "135% (Крупный)", "135% (Larger)")).clicked() {
-                                        ctx.set_zoom_factor(1.35);
+                                        active_ctx.set_zoom_factor(1.35);
                                     }
                                     if ui.selectable_value(&mut app.temp_settings.text_scale, 1.50, crate::i18n::t(lang, "150% (Очень крупный)", "150% (Huge)")).clicked() {
-                                        ctx.set_zoom_factor(1.50);
+                                        active_ctx.set_zoom_factor(1.50);
                                     }
                                 });
                         });
@@ -220,7 +248,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         let smooth_text = crate::i18n::t(lang, "Плавная настройка", "Smooth adjustment");
                         if ui.add(egui::Slider::new(&mut scale_val, 0.85..=1.75).step_by(0.05).text(smooth_text)).changed() {
                             app.temp_settings.text_scale = scale_val;
-                            ctx.set_zoom_factor(scale_val);
+                            active_ctx.set_zoom_factor(scale_val);
                         }
                     }
                     SettingsTab::Uninstaller => {
@@ -230,8 +258,10 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             "Tree display of program updates (child items):"
                         );
                         ui.label(RichText::new(updates_hdr).strong());
+                        let group_tip = crate::i18n::t(lang, "Определяет группировку компонентов софта в основном списке", "Controls grouping of software components in the main list");
                         ui.horizontal(|ui| {
-                            ui.label(crate::i18n::t(lang, "Отображать обновления программ", "Display program updates"));
+                            ui.label(crate::i18n::t(lang, "Отображать обновления программ", "Display program updates"))
+                                .on_hover_text(group_tip);
                             let upd_label = match app.temp_settings.tree_updates_mode.as_str() {
                                 "expanded" => crate::i18n::t(lang, "Развернутыми", "Expanded"),
                                 "hidden" => crate::i18n::t(lang, "Не отображать", "Do not display"),
@@ -245,8 +275,6 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                     ui.selectable_value(&mut app.temp_settings.tree_updates_mode, "expanded".to_string(), crate::i18n::t(lang, "Развернутыми", "Expanded"));
                                     ui.selectable_value(&mut app.temp_settings.tree_updates_mode, "hidden".to_string(), crate::i18n::t(lang, "Не отображать", "Do not display"));
                                 });
-                            let group_tip = crate::i18n::t(lang, "Определяет группировку компонентов софта в основном списке", "Controls grouping of software components in the main list");
-                            ui.label("🛈").on_hover_text(group_tip);
                         });
 
                         ui.add_space(10.0);
@@ -305,10 +333,12 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     }
                 });
             });
-        });
+        },
+    );
 
-    if !is_open || do_cancel {
+    if !outcome.still_open || do_cancel {
         ctx.set_zoom_factor(app.settings.text_scale);
+        app.dark_mode = resolve_dark_mode(&app.settings.theme_mode);
         app.temp_settings = app.settings.clone();
         app.settings_open = false;
     }
@@ -317,12 +347,14 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         app.settings = app.temp_settings.clone();
         save_settings(&app.settings);
         ctx.set_zoom_factor(app.settings.text_scale);
-        app.dark_mode = match app.settings.theme_mode.as_str() {
-            "light" => false,
-            "system" => is_windows_dark_mode(),
-            _ => true,
-        };
+        app.dark_mode = resolve_dark_mode(&app.settings.theme_mode);
         app.status_msg = crate::i18n::t(lang, "Настройки успешно сохранены.", "Settings saved successfully.").to_string();
         app.settings_open = false;
+    }
+
+    if app.settings_open && outcome.detached {
+        app.detached_modals.insert("modal_settings");
+    } else {
+        app.detached_modals.remove("modal_settings");
     }
 }

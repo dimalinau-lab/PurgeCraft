@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-11-10
+
+### Added
+- **Movable & Resizable Windows**: All modal dialogs, confirmation prompts, and utility windows can now be dragged and manually resized.
+- **Pop-Out OS Windows**: Working windows (Settings, Removal Wizard, Install Tracker, GPU Shaders, PATH Sanitizer, Portable Scanner, Runtime Analyzer, Winget Manager, System Cleaner, Dev Caches, Services Manager, and Updater) can be detached into standalone native Windows windows for multi-monitor use and docked back inside PurgeCraft.
+
+### Changed
+- **Toolbar & Settings**: Moved theme switching (`Dark`, `Light`, `System`) with live preview into `Settings -> Interface`, removed the toolbar logo/title block and top-bar theme button, and removed the descriptive text block from the `Help` menu.
+
+### Fixed
+- **Cross-App Leftovers & Process Detection**: Fixed leftover scanning and running-process checks affecting other still-installed programs with overlapping names.
+- **Search Input & Hotkeys**: Fixed search field losing focus after the first character and prevented `Delete` from triggering uninstall while typing in text fields.
+- **Program & Startup List Selection**: Fixed long program names blocking row clicks in the main and startup tables.
+- **Install Tracker Scrolling & Baseline**: Fixed heavy scrolling lag on large installation logs and eliminated false logging of pre-existing files on startup.
+- **Adaptive Windows & Text Overlap**: Fixed modal windows clipping outside smaller app windows, removed empty bottom padding across dialogs and Settings, and fixed text and badges overlapping action buttons in Winget Manager, Portable Scanner, Services Manager, GPU Shaders, Runtime Analyzer, System Cleaner, and Dev Caches.
+- **UI & Stability**: Removed the missing-glyph square icon (`□`) in Settings, enforced symlink/junction safety during recursive folder cleanup, fixed icon/service metadata resource cleanup, and added stricter Windows service name validation.
+
+---
+
 ## [1.0.4] - 2026-10-27
 
 ### Fixed
