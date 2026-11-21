@@ -30,10 +30,10 @@ pub fn render_disk_treemap(app: &mut PurgeCraftApp, ui: &mut egui::Ui, filtered_
         .inner_margin(10.0)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(RichText::new("📊 Анализ дискового пространства").heading().strong());
+                ui.label(RichText::new("Анализ дискового пространства").heading());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(RichText::new(format!("Всего занято: {}", format_size(total_bytes))).strong().color(Color32::from_rgb(16, 185, 129)));
-                    ui.label(format!("Программ с известным размером: {} •", sized_apps.len()));
+                    ui.label(format!("Программ с известным размером: {}", sized_apps.len()));
                 });
             });
 
@@ -197,10 +197,10 @@ pub fn render_disk_treemap(app: &mut PurgeCraftApp, ui: &mut egui::Ui, filtered_
                                     ui.label(RichText::new(pub_name).size(10.5).color(Color32::GRAY));
 
                                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        if ui.small_button(RichText::new("🗑 Удалить").size(10.5)).clicked() {
+                                        if ui.small_button(RichText::new("Удалить").size(10.5)).clicked() {
                                             app_to_uninstall = Some(a.clone());
                                         }
-                                        if !a.install_location.is_empty() && ui.small_button(RichText::new("📁").size(10.5)).on_hover_text("Открыть папку программы").clicked() {
+                                        if !a.install_location.is_empty() && ui.small_button(RichText::new("Папка").size(10.5)).on_hover_text("Открыть папку программы").clicked() {
                                             open_system_folder(&a.install_location, app.settings.use_total_commander);
                                         }
                                     });

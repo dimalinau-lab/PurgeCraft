@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-11-21
+
+### Changed
+- **Visual Polish & Clean Desktop Aesthetic**: Removed redundant emoji prefixes from toolbar actions, menus, context items, tab headers, and modal dialogs.
+- **Subtitle Reflex Elimination**: Removed duplicate secondary subtitles across System Cleaner, Dev Cleaner, Services Manager, PATH Sanitizer, and GPU Shaders.
+- **Engineering Terminology & De-hyping**:
+  - Replaced informal wording in Services Manager with factual labels ("Services with missing binary", "Binary missing", "Remove entry").
+  - Cleaned PATH Sanitizer status indicators to neutral sentence-case labels ("Missing", "Duplicate", "Exists").
+  - Removed decorative icons and marketing badges from leftover traces and uninstallation wizard.
+- **Search & Input Simplification**: Simplified search field placeholder and standardized clear/dock controls.
+- **Layout Invariants**: Normalized margins and paddings to a 4/8px spatial grid and eliminated duplicate bold styling on headings.
+
+---
+
 ## [1.1.0] - 2026-11-10
 
 ### Added

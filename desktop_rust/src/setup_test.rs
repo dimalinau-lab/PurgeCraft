@@ -234,12 +234,12 @@ impl eframe::App for UninstallerApp {
                     ctx.request_repaint_after(std::time::Duration::from_millis(50));
                 }
                 UninstallerPhase::Done => {
-                    ui.heading(RichText::new("✔ Деинсталляция завершена").size(16.0).color(Color32::from_rgb(34, 197, 94)).strong());
+                    ui.heading(RichText::new("Деинсталляция завершена").size(16.0).color(Color32::from_rgb(34, 197, 94)));
                     ui.add_space(8.0);
                     ui.label("Штатный деинсталлятор программы завершил свою работу.");
                     ui.add_space(6.0);
-                    ui.label(RichText::new("Обратите внимание: штатный деинсталлятор удалил только основной exe, оставив пользовательские файлы в AppData и ключ настроек в HKCU\\Software!").small().color(Color32::from_rgb(234, 179, 8)));
-                    ui.label("Теперь PurgeCraft автоматически запустит «Мастер Удаления ™» для их обнаружения.");
+                    ui.label(RichText::new("Обратите внимание: штатный деинсталлятор удалил только основной exe, оставив пользовательские файлы в AppData и ключ настроек в HKCU\\Software.").small().color(Color32::from_rgb(234, 179, 8)));
+                    ui.label("Теперь PurgeCraft автоматически запустит мастер удаления для их обнаружения.");
                     ui.add_space(18.0);
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -276,7 +276,7 @@ impl eframe::App for SetupTestLabApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.set_width(540.0);
 
-            ui.heading(RichText::new("🧪 PurgeCraft QA TestLab — Тестовое Приложение").size(18.0).strong());
+            ui.heading(RichText::new("PurgeCraft QA TestLab: Тестовое приложение").size(18.0));
             ui.label("Утилита для полной проверки жизненного цикла программы в PurgeCraft.");
             ui.add_space(10.0);
             ui.separator();
@@ -289,7 +289,7 @@ impl eframe::App for SetupTestLabApp {
 
                 let render_indicator = |ui: &mut egui::Ui, name: &str, active: bool, detail: &str| {
                     ui.horizontal(|ui| {
-                        let icon = if active { "✔" } else { "✖" };
+                        let icon = if active { "Вкл" } else { "Откл" };
                         let color = if active { Color32::from_rgb(34, 197, 94) } else { Color32::from_rgb(156, 163, 175) };
                         ui.label(RichText::new(icon).color(color).strong());
                         ui.label(name);
@@ -310,7 +310,7 @@ impl eframe::App for SetupTestLabApp {
 
             // Action Buttons
             ui.horizontal(|ui| {
-                let install_btn = egui::Button::new(RichText::new("🚀 1. Установить приложение").strong().size(13.0).color(Color32::WHITE))
+                let install_btn = egui::Button::new(RichText::new("1. Установить приложение").size(13.0).color(Color32::WHITE))
                     .fill(Color32::from_rgb(37, 99, 235));
                 if ui.add(install_btn).clicked() {
                     match install_test_app() {
@@ -325,14 +325,14 @@ impl eframe::App for SetupTestLabApp {
                 }
 
                 let uninst_enabled = self.status.is_uninstall_registered || self.status.local_dir_exists;
-                let uninst_btn = egui::Button::new(RichText::new("🗑 2. Штатный деинсталлятор").size(13.0));
+                let uninst_btn = egui::Button::new(RichText::new("2. Штатный деинсталлятор").size(13.0));
                 if ui.add_enabled(uninst_enabled, uninst_btn).clicked() {
                     let local = get_local_dir();
                     let uninst_exe = local.join("uninstall.exe");
                     let _ = std::process::Command::new(uninst_exe).arg("--uninstall").spawn();
                 }
 
-                if ui.button(RichText::new("♻ Очистить всё").size(13.0)).on_hover_text("Полная очистка реестра и папок без следов").clicked() {
+                if ui.button(RichText::new("Очистить всё").size(13.0)).on_hover_text("Полная очистка реестра и папок без следов").clicked() {
                     full_cleanup();
                     self.status = check_status();
                     self.msg = Some(("Все файлы и ветки реестра полностью удалены.".to_string(), true));
@@ -341,13 +341,13 @@ impl eframe::App for SetupTestLabApp {
 
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                if ui.button("📁 Открыть папку LocalAppData").clicked() {
+                if ui.button("Открыть папку LocalAppData").clicked() {
                     let _ = open::that(get_local_dir());
                 }
-                if ui.button("📁 Открыть папку Roaming").clicked() {
+                if ui.button("Открыть папку Roaming").clicked() {
                     let _ = open::that(get_roaming_dir());
                 }
-                if ui.button("🗄 Открыть Regedit").clicked() {
+                if ui.button("Открыть Regedit").clicked() {
                     let _ = std::process::Command::new("regedit").spawn();
                 }
             });
@@ -361,11 +361,11 @@ impl eframe::App for SetupTestLabApp {
             ui.add_space(14.0);
             ui.group(|ui| {
                 ui.strong("Сценарий проверки в PurgeCraft:");
-                ui.label("1. Нажмите «🚀 1. Установить приложение» выше.");
-                ui.label("2. Запустите PurgeCraft — программа появится в самом верху с бейджем ✨ НОВОЕ.");
-                ui.label("3. Выберите «Деинсталляция» — PurgeCraft запустит штатный деинсталлятор и перейдет в режим ожидания.");
+                ui.label("1. Нажмите «1. Установить приложение» выше.");
+                ui.label("2. Запустите PurgeCraft: программа появится вверху списка с бейджем «Новое».");
+                ui.label("3. Выберите «Деинсталляция»: PurgeCraft запустит штатный деинсталлятор и перейдет в режим ожидания.");
                 ui.label("4. В деинсталляторе нажмите «Удалить» и «Готово».");
-                ui.label("5. PurgeCraft автоматически откроет Мастер удаления остатков, покажет зеленую шкалу поиска, найдет оставшиеся ветки реестра и файлы AppData, и подчистую вычистит их!");
+                ui.label("5. PurgeCraft автоматически откроет мастер удаления остатков, найдет оставшиеся ветки реестра и файлы AppData, и очистит их.");
             });
         });
     }

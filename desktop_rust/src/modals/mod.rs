@@ -108,14 +108,14 @@ fn render_detach_header(
 ) -> bool {
     let mut toggle_clicked = false;
     let btn_label = if is_detached {
-        crate::i18n::t(lang, "↙ В программу", "↙ Dock")
+        crate::i18n::t(lang, "Закрепить", "Dock")
     } else {
-        crate::i18n::t(lang, "↗ В окно", "↗ Pop out")
+        crate::i18n::t(lang, "Открепить", "Pop out")
     };
     let btn_tip = if is_detached {
-        crate::i18n::t(lang, "Вернуть окно внутрь главного окна PurgeCraft", "Dock window back inside PurgeCraft")
+        crate::i18n::t(lang, "Вернуть окно внутрь главного окна", "Dock window back inside main window")
     } else {
-        crate::i18n::t(lang, "Вынести в отдельное окно Windows (можно перетащить за пределы программы)", "Open in separate OS window (can drag outside PurgeCraft)")
+        crate::i18n::t(lang, "Вынести в отдельное окно", "Open in separate window")
     };
 
     ui.horizontal(|ui| {
@@ -131,7 +131,7 @@ fn render_detach_header(
             }
             if let Some(h) = heading {
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(egui::RichText::new(h).heading().strong()).truncate());
+                    ui.add(egui::Label::new(egui::RichText::new(h).heading()).truncate());
                 });
             }
         });

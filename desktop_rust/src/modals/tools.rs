@@ -36,8 +36,8 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_shader",
-        crate::i18n::t(lang, "🎮 Очиститель кэша шейдеров GPU и DirectX", "🎮 GPU & DirectX Shader Cache Cleaner"),
-        Some(crate::i18n::t(lang, "🎮 Глубокая очистка кэшей GPU", "🎮 Deep GPU Cache Cleaning")),
+        crate::i18n::t(lang, "Очиститель кэша шейдеров GPU", "GPU Shader Cache Cleaner"),
+        None,
         egui::vec2(640.0, 440.0),
         egui::vec2(380.0, 280.0),
         true,
@@ -65,17 +65,17 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             // Selection buttons
             ui.horizontal_wrapped(|ui| {
-                if ui.button(crate::i18n::t(lang, "☑ Выбрать все", "☑ Select All")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Выбрать все", "Select All")).clicked() {
                     for loc in &mut app.shader_locations {
                         loc.selected = true;
                     }
                 }
-                if ui.button(crate::i18n::t(lang, "☐ Снять выбор", "☐ Deselect All")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Снять выбор", "Deselect All")).clicked() {
                     for loc in &mut app.shader_locations {
                         loc.selected = false;
                     }
                 }
-                if ui.button(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Пересканировать", "Rescan")).clicked() {
                     do_rescan = true;
                 }
             });
@@ -145,7 +145,7 @@ pub fn render_shader_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     }
                     let can_clean = total_selected_bytes > 0 && !app.shader_cleaning;
                     let clean_btn = egui::Button::new(
-                        RichText::new(format!("{} ({})", crate::i18n::t(lang, "♻ Очистить", "♻ Clean"), format_size_lang(total_selected_bytes, lang)))
+                        RichText::new(format!("{} ({})", crate::i18n::t(lang, "Очистить", "Clean"), format_size_lang(total_selected_bytes, lang)))
                             .strong()
                             .color(Color32::WHITE)
                     )
@@ -214,8 +214,8 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_path",
-        crate::i18n::t(lang, "🗄 Санитайзер системного и пользовательского PATH", "🗄 System & User PATH Sanitizer"),
-        Some(crate::i18n::t(lang, "🗄 Санитайзер переменных среды PATH", "🗄 PATH Environment Variables Sanitizer")),
+        crate::i18n::t(lang, "Санитайзер переменных PATH", "PATH Environment Variables Sanitizer"),
+        None,
         egui::vec2(780.0, 460.0),
         egui::vec2(400.0, 280.0),
         true,
@@ -243,30 +243,30 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             // Action buttons (wraps cleanly on compact windows)
             ui.horizontal_wrapped(|ui| {
-                if ui.button(crate::i18n::t(lang, "☑ Битые и дубликаты", "☑ Broken & Duplicates")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Битые и дубликаты", "Broken & Duplicates")).clicked() {
                     for e in &mut app.path_entries {
                         e.selected = !e.exists || e.is_duplicate;
                     }
                 }
-                if ui.button(crate::i18n::t(lang, "☑ Все", "☑ Select All")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Все", "Select All")).clicked() {
                     for e in &mut app.path_entries {
                         e.selected = true;
                     }
                 }
-                if ui.button(crate::i18n::t(lang, "☐ Снять", "☐ Deselect All")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Снять", "Deselect All")).clicked() {
                     for e in &mut app.path_entries {
                         e.selected = false;
                     }
                 }
                 let stats = format!(
-                    "{}: {}  •  {}: {}",
+                    "{}: {}, {}: {}",
                     crate::i18n::t(lang, "Битых", "Broken"),
                     total_broken,
                     crate::i18n::t(lang, "Дубликатов", "Duplicates"),
                     total_duplicates
                 );
                 ui.label(RichText::new(stats).color(Color32::from_rgb(148, 163, 184)));
-                if ui.button(crate::i18n::t(lang, "🔄 Обновить", "🔄 Refresh")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Обновить", "Refresh")).clicked() {
                     do_rescan = true;
                 }
             });
@@ -305,20 +305,20 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         egui::Frame::none()
                                             .fill(if app.dark_mode { Color32::from_rgb(69, 10, 10) } else { Color32::from_rgb(254, 226, 226) })
                                             .rounding(3.0)
-                                            .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                            .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                             .show(ui, |ui| {
-                                                ui.label(RichText::new(crate::i18n::t(lang, "🔴 МЕРТВЫЙ ПУТЬ", "🔴 DEAD PATH")).small().strong().color(Color32::from_rgb(239, 68, 68)));
+                                                ui.label(RichText::new(crate::i18n::t(lang, "Не существует", "Missing")).small().strong().color(Color32::from_rgb(239, 68, 68)));
                                             });
                                     } else if entry.is_duplicate {
                                         egui::Frame::none()
                                             .fill(if app.dark_mode { Color32::from_rgb(66, 32, 6) } else { Color32::from_rgb(254, 243, 199) })
                                             .rounding(3.0)
-                                            .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                            .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                             .show(ui, |ui| {
-                                                ui.label(RichText::new(crate::i18n::t(lang, "🟡 ДУБЛИКАТ", "🟡 DUPLICATE")).small().strong().color(Color32::from_rgb(217, 119, 6)));
+                                                ui.label(RichText::new(crate::i18n::t(lang, "Дубликат", "Duplicate")).small().strong().color(Color32::from_rgb(217, 119, 6)));
                                             });
                                     } else {
-                                        ui.label(RichText::new(crate::i18n::t(lang, "🟢 Существует", "🟢 Exists")).small().color(Color32::from_rgb(34, 197, 94)));
+                                        ui.label(RichText::new(crate::i18n::t(lang, "Существует", "Exists")).small().color(Color32::from_rgb(34, 197, 94)));
                                     }
 
                                     ui.add(egui::Label::new(RichText::new(&entry.path).monospace().size(12.0)).truncate())
@@ -346,7 +346,7 @@ pub fn render_path_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         do_close = true;
                     }
                     let can_clean = total_selected > 0;
-                    let clean_label = format!("{} ({})", crate::i18n::t(lang, "♻ Очистить выбранные", "♻ Clean Selected"), total_selected);
+                    let clean_label = format!("{} ({})", crate::i18n::t(lang, "Очистить выбранные", "Clean Selected"), total_selected);
                     let clean_btn = egui::Button::new(
                         RichText::new(clean_label)
                             .strong()
@@ -428,8 +428,8 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_portable",
-        crate::i18n::t(lang, "📦 Сканер Portable-программ", "📦 Portable Apps Scanner"),
-        Some(crate::i18n::t(lang, "📦 Сканер Portable-софта", "📦 Portable Apps Scanner")),
+        crate::i18n::t(lang, "Сканер Portable-программ", "Portable Apps Scanner"),
+        None,
         egui::vec2(740.0, 460.0),
         egui::vec2(400.0, 280.0),
         true,
@@ -457,10 +457,10 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             // Action buttons
             ui.horizontal_wrapped(|ui| {
-                if ui.button(crate::i18n::t(lang, "📂 Добавить папку для сканирования...", "📂 Add folder to scan...")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Добавить папку для сканирования...", "Add folder to scan...")).clicked() {
                     do_pick_folder = true;
                 }
-                if ui.button(crate::i18n::t(lang, "🔄 Пересканировать", "🔄 Rescan")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Пересканировать", "Rescan")).clicked() {
                     do_rescan = true;
                 }
                 let found_text = format!(
@@ -493,19 +493,18 @@ pub fn render_portable_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 super::split_row(
                                     ui,
                                     |ui| {
-                                        if ui.button(crate::i18n::t(lang, "🗑 Удалить", "🗑 Delete")).clicked() {
+                                        if ui.button(crate::i18n::t(lang, "Удалить", "Delete")).clicked() {
                                             app_to_delete = Some(p_app.clone());
                                         }
-                                        if ui.button(crate::i18n::t(lang, "📁 Папка", "📁 Folder")).clicked() {
+                                        if ui.button(crate::i18n::t(lang, "Папка", "Folder")).clicked() {
                                             app_to_open_folder = Some(p_app.folder_path.clone());
                                         }
-                                        if ui.button(crate::i18n::t(lang, "▶ Запустить", "▶ Launch")).clicked() {
+                                        if ui.button(crate::i18n::t(lang, "Запустить", "Launch")).clicked() {
                                             app_to_launch = Some(p_app.exe_path.clone());
                                         }
                                     },
                                     |ui| {
                                         ui.horizontal(|ui| {
-                                            ui.label(RichText::new("📦").size(18.0));
                                             ui.vertical(|ui| {
                                                 ui.add(egui::Label::new(RichText::new(&p_app.name).strong()).truncate())
                                                     .on_hover_text(&p_app.name);
@@ -621,8 +620,8 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_runtime",
-        crate::i18n::t(lang, "⚖ Анализатор дубликатов версий (Visual C++, Java, .NET)", "⚖ Runtime Duplicate Analyzer (Visual C++, Java, .NET)"),
-        Some(crate::i18n::t(lang, "⚖ Анализатор дубликатов системных сред выполнения", "⚖ System Runtime Duplicate Analyzer")),
+        crate::i18n::t(lang, "Анализатор дубликатов версий (Visual C++, Java, .NET)", "Runtime Duplicate Analyzer (Visual C++, Java, .NET)"),
+        None,
         egui::vec2(760.0, 460.0),
         egui::vec2(400.0, 280.0),
         true,
@@ -667,11 +666,11 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 ui.horizontal_wrapped(|ui| {
                                     ui.heading(RichText::new(&group.family_name).size(15.0).strong());
                                     if group.duplicate_count > 0 {
-                                        let dup_label = format!("⚠ {}: {}", crate::i18n::t(lang, "Дубликатов", "Duplicates"), group.duplicate_count);
+                                        let dup_label = format!("{}: {}", crate::i18n::t(lang, "Дубликатов", "Duplicates"), group.duplicate_count);
                                         ui.label(RichText::new(dup_label).color(Color32::from_rgb(234, 179, 8)).strong());
                                     }
                                     if group.has_deprecated {
-                                        ui.label(RichText::new(crate::i18n::t(lang, "🛑 Есть устаревшие (EOL)", "🛑 Outdated versions present (EOL)")).color(Color32::from_rgb(239, 68, 68)).strong());
+                                        ui.label(RichText::new(crate::i18n::t(lang, "Есть устаревшие (EOL)", "Outdated versions present (EOL)")).color(Color32::from_rgb(239, 68, 68)).strong());
                                     }
                                 });
                                 ui.add_space(2.0);
@@ -681,7 +680,7 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                         ui,
                                         |ui| {
                                             if !item.uninstall_string.is_empty()
-                                                && ui.button(crate::i18n::t(lang, "🗑 Удалить", "🗑 Uninstall")).clicked()
+                                                && ui.button(crate::i18n::t(lang, "Удалить", "Uninstall")).clicked()
                                             {
                                                 runtime_to_uninstall = Some(item.uninstall_string.clone());
                                             }
@@ -695,9 +694,9 @@ pub fn render_runtime_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                     egui::Frame::none()
                                                         .fill(if app.dark_mode { Color32::from_rgb(69, 10, 10) } else { Color32::from_rgb(254, 226, 226) })
                                                         .rounding(3.0)
-                                                        .inner_margin(egui::Margin::symmetric(4.0, 1.0))
+                                                        .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                                         .show(ui, |ui| {
-                                                            ui.label(RichText::new(crate::i18n::t(lang, "УСТАРЕЛО (EOL)", "DEPRECATED (EOL)")).small().strong().color(Color32::from_rgb(239, 68, 68)));
+                                                            ui.label(RichText::new(crate::i18n::t(lang, "Устарело (EOL)", "Deprecated (EOL)")).small().strong().color(Color32::from_rgb(239, 68, 68)));
                                                         });
                                                 }
 
@@ -762,8 +761,8 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_winget",
-        crate::i18n::t(lang, "🚀 Менеджер пакетов и обновлений Winget", "🚀 Winget Package & Update Manager"),
-        Some(crate::i18n::t(lang, "🚀 Диспетчер пакетов Windows (Winget CLI)", "🚀 Windows Package Manager (Winget CLI)")),
+        crate::i18n::t(lang, "Менеджер пакетов Winget", "Winget Package Manager"),
+        None,
         egui::vec2(760.0, 480.0),
         egui::vec2(420.0, 300.0),
         true,
@@ -773,8 +772,8 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         |ui, active_ctx| {
             ui.label(crate::i18n::t(
                 lang,
-                "Интеграция с репозиторием Winget. Позволяет проверять наличие официальных обновлений установленных программ и производить их тихое удаление без открытия сторонних мастеров.",
-                "Integration with Winget repository. Check official updates for installed software and perform silent removal without third-party wizards."
+                "Интеграция с репозиторием Winget. Проверка официальных обновлений установленных программ и их тихое удаление.",
+                "Integration with Winget repository. Check official updates for installed software and perform silent removal."
             ));
             ui.add_space(6.0);
 
@@ -791,7 +790,7 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             // Top Action Bar
             ui.horizontal_wrapped(|ui| {
-                let refresh_btn = egui::Button::new(crate::i18n::t(lang, "🔄 Обновить список пакетов Winget", "🔄 Refresh Winget package list"));
+                let refresh_btn = egui::Button::new(crate::i18n::t(lang, "Обновить список", "Refresh list"));
                 if ui.add_enabled(!app.winget_is_busy, refresh_btn).clicked() {
                     do_rescan = true;
                 }
@@ -842,12 +841,12 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                 super::split_row(
                                     ui,
                                     |ui| {
-                                        let uninst_btn = egui::Button::new(crate::i18n::t(lang, "🗑 Удалить (Winget)", "🗑 Uninstall (Winget)"));
+                                        let uninst_btn = egui::Button::new(crate::i18n::t(lang, "Удалить (Winget)", "Uninstall (Winget)"));
                                         if ui.add_enabled(!app.winget_is_busy, uninst_btn).clicked() {
                                             pkg_to_uninstall = Some(pkg.id.clone());
                                         }
                                         if pkg.available_version.is_some() {
-                                            let up_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "⬆ Обновить", "⬆ Upgrade")).color(Color32::WHITE).strong())
+                                            let up_btn = egui::Button::new(RichText::new(crate::i18n::t(lang, "Обновить", "Upgrade")).color(Color32::WHITE).strong())
                                                 .fill(Color32::from_rgb(22, 163, 74));
                                             if ui.add_enabled(!app.winget_is_busy, up_btn).clicked() {
                                                 pkg_to_upgrade = Some(pkg.id.clone());
@@ -864,9 +863,9 @@ pub fn render_winget_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                                                 egui::Frame::none()
                                                     .fill(if app.dark_mode { Color32::from_rgb(20, 83, 45) } else { Color32::from_rgb(220, 252, 231) })
                                                     .rounding(3.0)
-                                                    .inner_margin(egui::Margin::symmetric(5.0, 1.0))
+                                                    .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                                     .show(ui, |ui| {
-                                                        let avail_text = format!("{} v{}", crate::i18n::t(lang, "⬆ Доступна", "⬆ Available"), avail);
+                                                        let avail_text = format!("{} v{}", crate::i18n::t(lang, "Доступна", "Available"), avail);
                                                         ui.label(RichText::new(avail_text).small().strong().color(Color32::from_rgb(22, 163, 74)));
                                                     });
                                             }

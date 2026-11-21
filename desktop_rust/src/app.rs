@@ -282,7 +282,7 @@ impl Default for PurgeCraftApp {
             startup_items: Vec::new(),
             selected_app_idx: if count > 0 { Some(0) } else { None },
             search_query: String::new(),
-            status_msg: format!("Программ: {} | Общий объем: {}", count, size_str),
+            status_msg: format!("{} программ, {}", count, size_str),
             dark_mode,
             sort_column: SortColumn::Name,
             sort_order: SortOrder::Ascending,
@@ -637,7 +637,7 @@ impl PurgeCraftApp {
         spawn_size_calculator(&self.apps, self.size_tx.clone());
         let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
         self.status_msg = format!(
-            "Программ: {} | Общий объем: {} | Обновление данных...",
+            "{} программ, {}, обновление данных...",
             self.apps.len(),
             format_size(total_size)
         );
@@ -870,7 +870,7 @@ impl eframe::App for PurgeCraftApp {
                 self.bump_apps_generation();
             }
             let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
-            self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
+            self.status_msg = format!("{} программ, {}", self.apps.len(), format_size(total_size));
             ctx.request_repaint();
         }
 
@@ -890,7 +890,7 @@ impl eframe::App for PurgeCraftApp {
             self.apps.sort_by_key(|a| a.name.to_lowercase());
             self.bump_apps_generation();
             let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
-            self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
+            self.status_msg = format!("{} программ, {}", self.apps.len(), format_size(total_size));
             ctx.request_repaint();
         }
 
@@ -938,7 +938,7 @@ impl eframe::App for PurgeCraftApp {
                 self.is_refreshing = false;
                 self.bump_apps_generation();
                 let total_size: u64 = self.apps.iter().map(|a| a.size_bytes).sum();
-                self.status_msg = format!("Программ: {} | Общий объем: {}", self.apps.len(), format_size(total_size));
+                self.status_msg = format!("{} программ, {}", self.apps.len(), format_size(total_size));
                 ctx.request_repaint();
             }
         }
@@ -1199,7 +1199,7 @@ impl eframe::App for PurgeCraftApp {
         egui::TopBottomPanel::top("top_menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button(crate::i18n::menu_file(lang), |ui| {
-                    if ui.button(crate::i18n::t(lang, "📄 Экспортировать список в HTML...", "📄 Export list to HTML...")).clicked() {
+                    if ui.button(crate::i18n::t(lang, "Экспорт списка в HTML...", "Export list to HTML...")).clicked() {
                         self.export_html();
                         ui.close_menu();
                     }
@@ -1212,15 +1212,15 @@ impl eframe::App for PurgeCraftApp {
                 ui.menu_button(crate::i18n::t(lang, "Действие", "Action"), |ui| {
                     let selected_count = self.batch_selected.len();
                     if selected_count > 1 {
-                        if ui.button(format!("🗑 {} ({})", crate::i18n::t(lang, "Пакетная деинсталляция", "Batch Uninstall"), selected_count)).clicked() {
+                        if ui.button(format!("{} ({})", crate::i18n::t(lang, "Пакетная деинсталляция", "Batch uninstall"), selected_count)).clicked() {
                             self.start_batch_uninstall();
                             ui.close_menu();
                         }
-                        if ui.button(format!("⚠ {} ({})", crate::i18n::t(lang, "Пакетное принудительное удаление", "Batch Force Removal"), selected_count)).clicked() {
+                        if ui.button(format!("{} ({})", crate::i18n::t(lang, "Пакетное принудительное удаление", "Batch force removal"), selected_count)).clicked() {
                             self.start_batch_force_removal();
                             ui.close_menu();
                         }
-                        if ui.button(crate::i18n::t(lang, "✕ Снять выбор со всех", "✕ Deselect All")).clicked() {
+                        if ui.button(crate::i18n::t(lang, "Снять выбор со всех", "Deselect all")).clicked() {
                             self.batch_selected.clear();
                             ui.close_menu();
                         }
@@ -1236,13 +1236,13 @@ impl eframe::App for PurgeCraftApp {
                                 self.force_confirm_open = true;
                                 ui.close_menu();
                             }
-                            if ui.button(crate::i18n::t(lang, "❌ Удалить запись из списка...", "❌ Remove Entry from List...")).clicked() {
+                            if ui.button(crate::i18n::t(lang, "Удалить запись из списка...", "Remove entry from list...")).clicked() {
                                 self.remove_entry_confirm_app = Some(app.clone());
                                 self.remove_entry_confirm_open = true;
                                 ui.close_menu();
                             }
                             ui.separator();
-                            if ui.button(crate::i18n::t(lang, "📁 Папка программы", "📁 Program Folder")).clicked() {
+                            if ui.button(crate::i18n::t(lang, "Папка программы", "Program folder")).clicked() {
                                 if !app.install_location.is_empty() {
                                     open_system_folder(&app.install_location, self.settings.use_total_commander);
                                 }
@@ -1250,12 +1250,12 @@ impl eframe::App for PurgeCraftApp {
                             }
                             if !app.is_uwp
                                 && !app.registry_path.is_empty()
-                                && ui.button(crate::i18n::t(lang, "🗄 Запись в реестре", "🗄 Registry Entry")).clicked()
+                                && ui.button(crate::i18n::t(lang, "Запись в реестре", "Registry entry")).clicked()
                             {
                                 jump_to_regedit(&app.registry_path);
                                 ui.close_menu();
                             }
-                            if ui.button(crate::i18n::t(lang, "🌐 Искать в Google", "🌐 Search on Google")).clicked() {
+                            if ui.button(crate::i18n::t(lang, "Искать в Google", "Search on Google")).clicked() {
                                 let url = format!("https://www.google.com/search?q={}+{}", app.name, app.publisher);
                                 let _ = open::that(url);
                                 ui.close_menu();
@@ -1295,17 +1295,17 @@ impl eframe::App for PurgeCraftApp {
                         self.update_modal_open = true;
                         ui.close_menu();
                     }
-                    if ui.button(crate::i18n::t(lang, "🌐 Репозиторий на GitHub...", "🌐 GitHub Repository...")).clicked() {
+                    if ui.button(crate::i18n::t(lang, "Репозиторий на GitHub...", "GitHub repository...")).clicked() {
                         let _ = open::that(format!("https://github.com/{}", self.settings.github_repo));
                         ui.close_menu();
                     }
                 });
 
-                if ui.button(crate::i18n::t(lang, "🔄 Обновить", "🔄 Refresh")).on_hover_text(crate::i18n::t(lang, "Обновить список программ (F5)", "Refresh programs list (F5)")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Обновить", "Refresh")).on_hover_text(crate::i18n::t(lang, "Обновить список программ (F5)", "Refresh programs list (F5)")).clicked() {
                     self.refresh_data();
                 }
 
-                if ui.button(crate::i18n::t(lang, "⚙ Настройки", "⚙ Settings")).on_hover_text(crate::i18n::t(lang, "Параметры и настройки программы", "Application settings and options")).clicked() {
+                if ui.button(crate::i18n::t(lang, "Настройки", "Settings")).clicked() {
                     self.temp_settings = self.settings.clone();
                     self.settings_tab = SettingsTab::General;
                     self.settings_open = true;
@@ -1313,15 +1313,14 @@ impl eframe::App for PurgeCraftApp {
 
                 match &self.update_status {
                     autoupdater::UpdateStatus::Available(info) => {
-                        if ui.button(RichText::new(format!("✨ {} v{}", crate::i18n::t(lang, "Доступно обновление", "Update available"), info.version)).color(Color32::from_rgb(59, 130, 246)).strong())
-                            .on_hover_text(crate::i18n::t(lang, "Нажмите для просмотра и установки обновления", "Click to view and install update"))
+                        if ui.button(RichText::new(format!("{} v{}", crate::i18n::t(lang, "Доступно обновление", "Update available"), info.version)).color(Color32::from_rgb(59, 130, 246)).strong())
                             .clicked()
                         {
                             self.update_modal_open = true;
                         }
                     }
                     autoupdater::UpdateStatus::ReadyToRestart
-                        if ui.button(RichText::new(crate::i18n::t(lang, "🚀 Перезапустить для обновления", "🚀 Restart to update")).color(Color32::from_rgb(34, 197, 94)).strong())
+                        if ui.button(RichText::new(crate::i18n::t(lang, "Перезапустить для обновления", "Restart to update")).color(Color32::from_rgb(34, 197, 94)).strong())
                             .clicked() =>
                     {
                         self.update_modal_open = true;
@@ -1359,7 +1358,7 @@ impl eframe::App for PurgeCraftApp {
                     }
                 };
 
-                let uninst_title = if self.settings.show_toolbar_labels { crate::i18n::tab_uninstaller(lang) } else { "📦" };
+                let uninst_title = if self.settings.show_toolbar_labels { crate::i18n::tab_uninstaller(lang) } else { "Программы" };
                 let uninst_btn = egui::Button::new(
                     RichText::new(uninst_title).strong().color(uninst_text)
                 )
@@ -1386,7 +1385,7 @@ impl eframe::App for PurgeCraftApp {
                     }
                 };
 
-                let startup_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "⚡ Автозапуск", "⚡ Startup") } else { "⚡" };
+                let startup_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "Автозапуск", "Startup") } else { "Автозапуск" };
                 let startup_btn = egui::Button::new(
                     RichText::new(startup_title).strong().color(startup_text)
                 )
@@ -1398,7 +1397,7 @@ impl eframe::App for PurgeCraftApp {
                 }
 
                 // Install Tracker
-                let tracker_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "⚡ Следить", "⚡ Track") } else { "⚡" };
+                let tracker_title = if self.settings.show_toolbar_labels { crate::i18n::t(lang, "Следить", "Track") } else { "Следить" };
                 let tracker_btn = egui::Button::new(
                     RichText::new(tracker_title)
                         .strong()
@@ -1409,8 +1408,8 @@ impl eframe::App for PurgeCraftApp {
 
                 let tracker_tip = crate::i18n::t(
                     lang,
-                    "Монитор установки (Install Tracker): отслеживать установку для 100% чистого удаления",
-                    "Install Tracker: monitor installation for 100% clean uninstall"
+                    "Монитор установки: отслеживание компонентов для полного удаления",
+                    "Install Tracker: monitor components for clean uninstall"
                 );
                 if ui.add(tracker_btn).on_hover_text(tracker_tip).clicked() {
                     self.tracker_installer_path.clear();
@@ -1423,7 +1422,7 @@ impl eframe::App for PurgeCraftApp {
 
                 // Always keep tools cleanly grouped into dropdown menu to avoid toolbar clutter
                 ui.menu_button(crate::i18n::menu_tools(lang), |ui| {
-                    if ui.button(crate::i18n::t(lang, "🎮 Шейдеры GPU...", "🎮 GPU Shaders...")).clicked() {
+                    if ui.button(crate::i18n::t(lang, "Шейдеры GPU...", "GPU shaders...")).clicked() {
                         self.shader_locations = scan_shader_caches();
                         self.shader_clean_msg = None;
                         self.shader_modal_open = true;
@@ -1481,7 +1480,7 @@ impl eframe::App for PurgeCraftApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button(crate::i18n::t(lang, "📄 Экспорт списка в HTML...", "📄 Export list to HTML...")).clicked() {
+                    if ui.button(crate::i18n::t(lang, "Экспорт списка в HTML...", "Export list to HTML...")).clicked() {
                         self.export_html();
                         ui.close_menu();
                     }
@@ -1490,7 +1489,7 @@ impl eframe::App for PurgeCraftApp {
                 // Right aligned search
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let search_w = (ui.available_width() - 28.0).clamp(100.0, 200.0);
-                    let search_hint = crate::i18n::t(lang, "Поиск... (Ctrl+F)", "Search... (Ctrl+F)");
+                    let search_hint = crate::i18n::t(lang, "Поиск", "Search");
                     let search_box = ui.add(
                         egui::TextEdit::singleline(&mut self.search_query)
                             .id(egui::Id::new("toolbar_search_input"))
@@ -1510,8 +1509,6 @@ impl eframe::App for PurgeCraftApp {
                             self.search_query.clear();
                             search_box.request_focus();
                         }
-                    } else {
-                        ui.label("🔍");
                     }
                 });
             });
@@ -1521,7 +1518,7 @@ impl eframe::App for PurgeCraftApp {
         // 3. Secondary Toolbar (Compact Category Tabs & Filter Menu)
         if self.active_tab == ActiveTab::Uninstaller {
             egui::TopBottomPanel::top("category_bar").show(ctx, |ui| {
-                ui.add_space(3.0);
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     let total_all = self.apps.len();
                     let total_user = self.apps.iter().filter(|a| !a.is_system_component && !a.is_uwp && a.source_badge != "[Portable]").count();
@@ -1563,9 +1560,9 @@ impl eframe::App for PurgeCraftApp {
                     };
 
                     let filter_label = if is_sub_filter_active {
-                        RichText::new(format!("🔍 {}", filter_title)).strong().color(Color32::from_rgb(56, 189, 248))
+                        RichText::new(&filter_title).strong().color(Color32::from_rgb(56, 189, 248))
                     } else {
-                        RichText::new(filter_title)
+                        RichText::new(&filter_title)
                     };
 
                     ui.menu_button(filter_label, |ui| {
@@ -1607,7 +1604,7 @@ impl eframe::App for PurgeCraftApp {
                             ui.close_menu();
                         }
                         for (&drive, &count) in &drives_count {
-                            let drive_label = format!("💽 {} {}: ({} {})", crate::i18n::filter_drive_item(lang), drive, count, crate::i18n::filter_apps_suffix(lang));
+                            let drive_label = format!("{} {}: ({} {})", crate::i18n::filter_drive_item(lang), drive, count, crate::i18n::filter_apps_suffix(lang));
                             if ui.selectable_value(&mut self.drive_filter, Some(drive), drive_label).clicked() {
                                 self.selected_app_idx = None;
                                 ui.close_menu();
@@ -1619,7 +1616,7 @@ impl eframe::App for PurgeCraftApp {
                     let actual_new_count = self.apps.iter().filter(|a| a.is_new).count();
                     if actual_new_count > 0 {
                         ui.separator();
-                        let clear_new_btn_title = format!("✨ {} ({})", crate::i18n::t(lang, "Сбросить «Новое»", "Clear \"New\""), actual_new_count);
+                        let clear_new_btn_title = format!("{} ({})", crate::i18n::t(lang, "Сбросить отметку «Новое»", "Clear \"New\" marks"), actual_new_count);
                         let clear_new_tip = crate::i18n::t(lang, "Снять отметку «Новое» со всех недавно установленных программ", "Clear \"New\" mark from all recently installed programs");
                         if ui.button(RichText::new(clear_new_btn_title).small().color(Color32::from_rgb(234, 179, 8)))
                             .on_hover_text(clear_new_tip)
@@ -1660,11 +1657,11 @@ impl eframe::App for PurgeCraftApp {
                         list_btn.on_hover_text(crate::i18n::view_list_tip(lang));
                     });
                 });
-                ui.add_space(3.0);
+                ui.add_space(4.0);
             });
         } else if self.active_tab == ActiveTab::Startup {
             egui::TopBottomPanel::top("startup_category_bar").show(ctx, |ui| {
-                ui.add_space(3.0);
+                ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     let total_all = self.startup_items.len();
                     let total_reg = self.startup_items.iter().filter(|i| i.source_type.contains("run")).count();
@@ -1689,7 +1686,7 @@ impl eframe::App for PurgeCraftApp {
                         }
                     });
                 });
-                ui.add_space(3.0);
+                ui.add_space(4.0);
             });
         }
 
@@ -1702,10 +1699,10 @@ impl eframe::App for PurgeCraftApp {
                 let actual_new_count = self.apps.iter().filter(|a| a.is_new).count();
                 if actual_new_count > 0 {
                     ui.separator();
-                    let new_label = format!("✨ {}: {}", crate::i18n::t(lang, "Недавно установлено", "Recently installed"), actual_new_count);
+                    let new_label = format!("{}: {}", crate::i18n::t(lang, "Недавно установлено", "Recently installed"), actual_new_count);
                     ui.label(RichText::new(new_label).color(Color32::from_rgb(234, 179, 8)).strong().small());
-                    let dismiss_btn = crate::i18n::t(lang, "✨ Убрать «Новое»", "✨ Clear \"New\"");
-                    let dismiss_tip = crate::i18n::t(lang, "Снять отметку «Новое» со всех программ, чтобы не мешало", "Dismiss \"New\" mark from all programs");
+                    let dismiss_btn = crate::i18n::t(lang, "Убрать отметку «Новое»", "Clear \"New\" mark");
+                    let dismiss_tip = crate::i18n::t(lang, "Снять отметку «Новое» со всех программ", "Dismiss \"New\" mark from all programs");
                     if ui.button(RichText::new(dismiss_btn).small()).on_hover_text(dismiss_tip).clicked() {
                         save_known_apps(&self.apps);
                         for a in &mut self.apps {

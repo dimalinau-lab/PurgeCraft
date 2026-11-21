@@ -91,12 +91,9 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 egui::vec2(340.0, 220.0),
                 |ui| {
 
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("⛔").size(24.0));
-                        ui.vertical(|ui| {
-                            ui.heading(RichText::new(crate::i18n::t(lang, "Принудительно завершить запущенные процессы?", "Terminate Running Processes?")).strong());
-                            ui.label(RichText::new(crate::i18n::t(lang, "Следующие процессы были обнаружены:", "The following active processes were detected:")).color(Color32::from_rgb(156, 163, 175)));
-                        });
+                    ui.vertical(|ui| {
+                        ui.heading(RichText::new(crate::i18n::t(lang, "Принудительно завершить запущенные процессы?", "Terminate Running Processes?")).strong());
+                        ui.label(RichText::new(crate::i18n::t(lang, "Следующие процессы были обнаружены:", "The following active processes were detected:")).color(Color32::from_rgb(156, 163, 175)));
                     });
 
                     ui.add_space(8.0);
@@ -131,7 +128,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.add_space(14.0);
 
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button(RichText::new(crate::i18n::t(lang, "⛔ Завершить процессы", "⛔ Terminate Processes")).strong().color(Color32::WHITE)).clicked() {
+                        if ui.button(RichText::new(crate::i18n::t(lang, "Завершить процессы", "Terminate processes")).strong().color(Color32::WHITE)).clicked() {
                             for proc in &app.running_processes {
                                 let _ = scanner::terminate_process_by_pid(proc.pid);
                             }
@@ -141,14 +138,14 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             app.execute_uninstall(target_app.clone());
                         }
 
-                        if ui.button(crate::i18n::t(lang, "⏩ Пропустить", "⏩ Skip")).clicked() {
+                        if ui.button(crate::i18n::t(lang, "Пропустить", "Skip")).clicked() {
                             app.running_processes_modal_open = false;
                             app.running_processes.clear();
                             app.running_processes_target_app = None;
                             app.execute_uninstall(target_app);
                         }
 
-                        if ui.button(crate::i18n::t(lang, "✖ Отмена", "✖ Cancel")).clicked() {
+                        if ui.button(crate::i18n::t(lang, "Отмена", "Cancel")).clicked() {
                             app.running_processes_modal_open = false;
                             app.running_processes.clear();
                             app.running_processes_target_app = None;
@@ -168,16 +165,13 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             egui::vec2(340.0, 220.0),
             |ui| {
 
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("🔒").size(24.0));
-                    ui.vertical(|ui| {
-                        ui.heading(RichText::new(crate::i18n::t(lang, "Некоторые файлы не удалены", "Some files could not be deleted")).strong());
-                        ui.label(RichText::new(crate::i18n::t(
-                            lang,
-                            "Следующие файлы на данный момент используются системой и не могут быть удалены:",
-                            "The following files are currently in use by the system and cannot be deleted:"
-                        )).color(Color32::from_rgb(156, 163, 175)));
-                    });
+                ui.vertical(|ui| {
+                    ui.heading(RichText::new(crate::i18n::t(lang, "Некоторые файлы не удалены", "Some files could not be deleted")).strong());
+                    ui.label(RichText::new(crate::i18n::t(
+                        lang,
+                        "Следующие файлы на данный момент используются системой и не могут быть удалены:",
+                        "The following files are currently in use by the system and cannot be deleted:"
+                    )).color(Color32::from_rgb(156, 163, 175)));
                 });
 
                 ui.add_space(8.0);
@@ -192,7 +186,6 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         egui::ScrollArea::vertical().max_height(scroll_h).auto_shrink([false, false]).show(ui, |ui| {
                             for file in &app.delayed_removal_files {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new("⏳").color(Color32::from_rgb(245, 158, 11)));
                                     ui.add(egui::Label::new(RichText::new(file).monospace().color(if app.dark_mode { Color32::from_rgb(229, 231, 235) } else { Color32::from_rgb(31, 41, 55) })).truncate())
                                         .on_hover_text(file);
                                 });
@@ -213,7 +206,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 ui.add_space(14.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new(crate::i18n::t(lang, "🔄 Перезагрузить", "🔄 Restart")).strong().color(Color32::WHITE)).clicked() {
+                    if ui.button(RichText::new(crate::i18n::t(lang, "Перезагрузить", "Restart")).strong().color(Color32::WHITE)).clicked() {
                         app.delayed_removal_modal_open = false;
                         app.delayed_removal_files.clear();
                         let mut cmd = Command::new("shutdown");
@@ -236,7 +229,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             super::show_confirm_window(
                 ctx,
                 "single_uninstall_progress_dialog",
-                format!("{} — {}", crate::i18n::t(lang, "Деинсталляция", "Uninstallation"), target_app.name),
+                format!("{}: {}", crate::i18n::t(lang, "Деинсталляция", "Uninstallation"), target_app.name),
                 egui::vec2(480.0, 200.0),
                 egui::vec2(320.0, 160.0),
                 |ui| {
@@ -251,7 +244,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         ui.label(crate::i18n::t(lang, "Ожидание закрытия деинсталлятора...", "Waiting for uninstaller to exit..."));
                     });
                     ui.add_space(12.0);
-                    if ui.button(RichText::new(crate::i18n::t(lang, "⚡ Перейти к поиску остатков", "⚡ Proceed to leftover scan")).strong()).clicked() {
+                    if ui.button(RichText::new(crate::i18n::t(lang, "Перейти к поиску остатков", "Proceed to leftover scan")).strong()).clicked() {
                         app.uninstall_waiting_open = false;
                         app.uninstall_child = None;
                         app.start_wizard_scan(target_app);
@@ -382,7 +375,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     let app_name = app.batch_queue_apps[curr].name.clone();
                     ui.label(format!("{}: «{}»", crate::i18n::t(lang, "Текущая", "Current"), app_name));
                     ui.horizontal(|ui| {
-                        if ui.button(crate::i18n::t(lang, "⏩ Следующая программа", "⏩ Next program")).clicked() {
+                        if ui.button(crate::i18n::t(lang, "Следующая программа", "Next program")).clicked() {
                             app.batch_queue_statuses[curr] = "Завершено".to_string();
                             app.batch_queue_idx += 1;
                             app.launch_current_batch_app();
@@ -400,7 +393,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.label(RichText::new(crate::i18n::t(lang, "Все программы из очереди обработаны!", "All queue programs have been processed!")).color(Color32::from_rgb(34, 197, 94)).strong());
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        if ui.button(crate::i18n::t(lang, "♻ Запустить поиск остатков для всех", "♻ Scan leftovers for all")).clicked() {
+                        if ui.button(crate::i18n::t(lang, "Запустить поиск остатков для всех", "Scan leftovers for all")).clicked() {
                             app.wizard_traces = collect_batch_leftovers(&app.batch_queue_apps, &app.apps);
                             app.wizard_app_title = format!("{} {} {}", crate::i18n::t(lang, "Пакет из", "Batch of"), app.batch_queue_apps.len(), crate::i18n::t(lang, "программ", "programs"));
                             app.wizard_report = None;
@@ -462,7 +455,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         super::show_confirm_window(
             ctx,
             "dlg_add_startup",
-            crate::i18n::t(lang, "➕ Добавить программу в автозапуск", "➕ Add Program to Startup"),
+            crate::i18n::t(lang, "Добавить программу в автозапуск", "Add program to startup"),
             egui::vec2(460.0, 290.0),
             egui::vec2(320.0, 220.0),
             |ui| {
@@ -477,7 +470,7 @@ pub fn render_dialogs(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 ui.horizontal(|ui| {
                     let path_w = (ui.available_width() - 105.0).max(140.0);
                     ui.add(egui::TextEdit::singleline(&mut app.new_startup_path).desired_width(path_w));
-                    if ui.button(crate::i18n::t(lang, "📁 Обзор...", "📁 Browse...")).clicked() {
+                    if ui.button(crate::i18n::t(lang, "Обзор...", "Browse...")).clicked() {
                         if let Some(p) = pick_file_dialog(crate::i18n::t(lang, "Исполняемые файлы", "Executables"), "*.exe") {
                             if app.new_startup_name.is_empty() {
                                 if let Some(stem) = std::path::Path::new(&p).file_stem() {

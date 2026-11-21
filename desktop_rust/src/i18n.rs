@@ -25,118 +25,118 @@ pub fn t(lang: Language, ru: &'static str, en: &'static str) -> &'static str {
 
 // Tabs
 pub fn tab_uninstaller(lang: Language) -> &'static str {
-    t(lang, "📦 Программы (Ctrl+1)", "📦 Programs (Ctrl+1)")
+    t(lang, "Программы (Ctrl+1)", "Programs (Ctrl+1)")
 }
 
 pub fn tab_treemap(lang: Language) -> &'static str {
-    t(lang, "📊 Размер диска (Ctrl+2)", "📊 Disk Space (Ctrl+2)")
+    t(lang, "Размер диска (Ctrl+2)", "Disk space (Ctrl+2)")
 }
 
 pub fn tab_startup(lang: Language) -> &'static str {
-    t(lang, "⚡ Автозагрузка (Ctrl+3)", "⚡ Startup (Ctrl+3)")
+    t(lang, "Автозагрузка (Ctrl+3)", "Startup (Ctrl+3)")
 }
 
 // Menus
 pub fn menu_file(lang: Language) -> &'static str {
-    t(lang, "📁 Файл ▾", "📁 File ▾")
+    t(lang, "Файл ▾", "File ▾")
 }
 
 pub fn menu_tools(lang: Language) -> &'static str {
-    t(lang, "🛠 Утилиты ▾", "🛠 Tools ▾")
+    t(lang, "Утилиты ▾", "Tools ▾")
 }
 
 pub fn menu_help(lang: Language) -> &'static str {
-    t(lang, "❓ Справка ▾", "❓ Help ▾")
+    t(lang, "Справка ▾", "Help ▾")
 }
 
 pub fn menu_refresh(lang: Language) -> &'static str {
-    t(lang, "🔄 Обновить список (F5)", "🔄 Refresh List (F5)")
+    t(lang, "Обновить список (F5)", "Refresh list (F5)")
 }
 
 pub fn menu_settings(lang: Language) -> &'static str {
-    t(lang, "⚙ Настройки...", "⚙ Settings...")
+    t(lang, "Настройки...", "Settings...")
 }
 
 pub fn menu_exit(lang: Language) -> &'static str {
-    t(lang, "❌ Выход", "❌ Exit")
+    t(lang, "Выход", "Exit")
 }
 
 pub fn menu_system_clean(lang: Language) -> &'static str {
-    t(lang, "♻ Очистка системы Windows...", "♻ Windows System Clean...")
+    t(lang, "Очистка системы Windows...", "Windows system clean...")
 }
 
 pub fn menu_dev_clean(lang: Language) -> &'static str {
-    t(lang, "🛠 Кэши сред разработки (npm, cargo...)...", "🛠 Developer Caches (npm, cargo...)...")
+    t(lang, "Кэши сред разработки...", "Developer caches...")
 }
 
 pub fn menu_services(lang: Language) -> &'static str {
-    t(lang, "⚙ Менеджер служб и зомби...", "⚙ Services & Zombie Processes...")
+    t(lang, "Службы Windows...", "Windows services...")
 }
 
 pub fn menu_path(lang: Language) -> &'static str {
-    t(lang, "🗄 Санитайзер переменной PATH...", "🗄 PATH Sanitizer...")
+    t(lang, "Санитайзер переменной PATH...", "PATH sanitizer...")
 }
 
 pub fn menu_portable(lang: Language) -> &'static str {
-    t(lang, "📦 Сканер Portable...", "📦 Portable Apps Scanner...")
+    t(lang, "Сканер Portable-программ...", "Portable apps scanner...")
 }
 
 pub fn menu_runtimes(lang: Language) -> &'static str {
-    t(lang, "⚖ Анализатор дубликатов VC++/Java...", "⚖ VC++/Java Duplicate Analyzer...")
+    t(lang, "Анализатор дубликатов VC++/Java...", "VC++/Java duplicate analyzer...")
 }
 
 pub fn menu_winget(lang: Language) -> &'static str {
-    t(lang, "🚀 Менеджер Winget...", "🚀 Winget Manager...")
+    t(lang, "Менеджер Winget...", "Winget manager...")
 }
 
 pub fn menu_about(lang: Language) -> &'static str {
-    t(lang, "ℹ О программе PurgeCraft", "ℹ About PurgeCraft")
+    t(lang, "О программе PurgeCraft", "About PurgeCraft")
 }
 
 pub fn menu_check_updates(lang: Language) -> &'static str {
-    t(lang, "🔄 Проверить обновления...", "🔄 Check for Updates...")
+    t(lang, "Проверить обновления...", "Check for updates...")
 }
 
 // Uninstaller Actions
 pub fn search_placeholder(lang: Language) -> &'static str {
-    t(lang, "🔍 Поиск программы... (Ctrl+F, Esc для сброса)", "🔍 Search programs... (Ctrl+F, Esc to clear)")
+    t(lang, "Поиск программы", "Search programs")
 }
 
 pub fn btn_uninstall(lang: Language) -> &'static str {
-    t(lang, "🗑 Деинсталляция (Del)", "🗑 Uninstall (Del)")
+    t(lang, "Деинсталляция (Del)", "Uninstall (Del)")
 }
 
 pub fn btn_force_remove(lang: Language) -> &'static str {
-    t(lang, "⚡ Принудительное удаление", "⚡ Force Removal")
+    t(lang, "Принудительное удаление", "Force removal")
 }
 
 pub fn btn_install_tracker(lang: Language) -> &'static str {
-    t(lang, "📸 Установка с мониторингом...", "📸 Install with Tracker...")
+    t(lang, "Установка с мониторингом...", "Install with tracker...")
 }
 
 pub fn btn_batch_uninstall(lang: Language) -> &'static str {
-    t(lang, "📦 Пакетное удаление...", "📦 Batch Uninstall...")
+    t(lang, "Пакетное удаление...", "Batch uninstall...")
 }
 
 // Startup Actions
 pub fn btn_add_startup(lang: Language) -> &'static str {
-    t(lang, "➕ Добавить программу в автозапуск", "➕ Add Program to Startup")
+    t(lang, "Добавить программу в автозапуск", "Add program to startup")
 }
 
 pub fn btn_disable(lang: Language) -> &'static str {
-    t(lang, "⏸ Отключить", "⏸ Disable")
+    t(lang, "Отключить", "Disable")
 }
 
 pub fn btn_enable(lang: Language) -> &'static str {
-    t(lang, "▶ Включить", "▶ Enable")
+    t(lang, "Включить", "Enable")
 }
 
 pub fn btn_delete(lang: Language) -> &'static str {
-    t(lang, "🗑 Удалить", "🗑 Delete")
+    t(lang, "Удалить", "Delete")
 }
 
 pub fn btn_jump_reg(lang: Language) -> &'static str {
-    t(lang, "🧭 Перейти в реестре", "🧭 Jump in RegEdit")
+    t(lang, "Перейти в реестре", "Jump in registry")
 }
 
 // Columns
@@ -198,7 +198,7 @@ pub fn filter_menu_title(lang: Language) -> &'static str {
 }
 
 pub fn filter_reset(lang: Language) -> &'static str {
-    t(lang, "✕ Сбросить фильтры", "✕ Reset filters")
+    t(lang, "Сбросить фильтры", "Reset filters")
 }
 
 pub fn filter_app_type_header(lang: Language) -> &'static str {
@@ -206,11 +206,11 @@ pub fn filter_app_type_header(lang: Language) -> &'static str {
 }
 
 pub fn filter_portable_label(lang: Language) -> &'static str {
-    t(lang, "📦 Portable", "📦 Portable")
+    t(lang, "Portable", "Portable")
 }
 
 pub fn filter_store_label(lang: Language) -> &'static str {
-    t(lang, "🏪 Магазин Windows", "🏪 Windows Store")
+    t(lang, "Магазин Windows", "Windows Store")
 }
 
 pub fn filter_arch_header(lang: Language) -> &'static str {
@@ -218,11 +218,11 @@ pub fn filter_arch_header(lang: Language) -> &'static str {
 }
 
 pub fn filter_arch_64(lang: Language) -> &'static str {
-    t(lang, "⚙ 64-бит", "⚙ 64-bit")
+    t(lang, "64-бит", "64-bit")
 }
 
 pub fn filter_arch_32(lang: Language) -> &'static str {
-    t(lang, "⚙ 32-бит", "⚙ 32-bit")
+    t(lang, "32-бит", "32-bit")
 }
 
 pub fn filter_drive_header(lang: Language) -> &'static str {
@@ -230,7 +230,7 @@ pub fn filter_drive_header(lang: Language) -> &'static str {
 }
 
 pub fn filter_all_drives(lang: Language) -> &'static str {
-    t(lang, "💾 Все диски", "💾 All drives")
+    t(lang, "Все диски", "All drives")
 }
 
 pub fn filter_drive_item(lang: Language) -> &'static str {
@@ -246,15 +246,15 @@ pub fn selected_count(lang: Language) -> &'static str {
 }
 
 pub fn view_treemap_btn(lang: Language) -> &'static str {
-    t(lang, "📊 Treemap", "📊 Treemap")
+    t(lang, "Treemap", "Treemap")
 }
 
 pub fn view_treemap_tip(lang: Language) -> &'static str {
-    t(lang, "Визуальная карта дискового пространства и крупнейших программ", "Visual map of disk space usage and largest programs")
+    t(lang, "Карта дискового пространства", "Visual map of disk space usage")
 }
 
 pub fn view_list_btn(lang: Language) -> &'static str {
-    t(lang, "📋 Список", "📋 List")
+    t(lang, "Список", "List")
 }
 
 pub fn view_list_tip(lang: Language) -> &'static str {
@@ -266,7 +266,7 @@ pub fn not_found_title(lang: Language) -> &'static str {
 }
 
 pub fn not_found_hint(lang: Language) -> &'static str {
-    t(lang, "Попробуйте сбросить поисковый фильтр (Esc) или переключить категорию.", "Try clearing the search filter (Esc) or changing category.")
+    t(lang, "Сбросьте поисковый фильтр или смените категорию.", "Clear the search filter or change category.")
 }
 
 pub fn sidebar_actions_header(lang: Language) -> &'static str {
@@ -274,27 +274,27 @@ pub fn sidebar_actions_header(lang: Language) -> &'static str {
 }
 
 pub fn sidebar_remove_entry(lang: Language) -> &'static str {
-    t(lang, "❌ Удалить запись из списка", "❌ Remove entry from list")
+    t(lang, "Удалить запись из списка", "Remove entry from list")
 }
 
 pub fn sidebar_remove_entry_tip(lang: Language) -> &'static str {
-    t(lang, "Удалить поврежденную запись из реестра Windows без запуска деинсталлятора", "Remove broken entry from Windows registry without running uninstaller")
+    t(lang, "Удалить запись из реестра без запуска деинсталлятора", "Remove entry from registry without running uninstaller")
 }
 
 pub fn sidebar_open_folder(lang: Language) -> &'static str {
-    t(lang, "📁 Открыть папку программы", "📁 Open program folder")
+    t(lang, "Открыть папку программы", "Open program folder")
 }
 
 pub fn sidebar_open_reg(lang: Language) -> &'static str {
-    t(lang, "🗄 Ключ в реестре Windows", "🗄 Windows registry key")
+    t(lang, "Ключ в реестре Windows", "Windows registry key")
 }
 
 pub fn sidebar_search_google(lang: Language) -> &'static str {
-    t(lang, "🌐 Найти информацию в Google", "🌐 Search Google for info")
+    t(lang, "Найти в Google", "Search Google")
 }
 
 pub fn sidebar_select_hint(lang: Language) -> &'static str {
-    t(lang, "Выберите программу из списка для просмотра сведений и действий.", "Select a program from the list to view details and actions.")
+    t(lang, "Выберите программу из списка для просмотра сведений.", "Select a program from the list to view details.")
 }
 
 // Startup Strings
@@ -303,23 +303,23 @@ pub fn startup_filter_all(lang: Language) -> &'static str {
 }
 
 pub fn startup_filter_registry(lang: Language) -> &'static str {
-    t(lang, "🗄 Реестр", "🗄 Registry")
+    t(lang, "Реестр", "Registry")
 }
 
 pub fn startup_filter_startmenu(lang: Language) -> &'static str {
-    t(lang, "📁 Меню Пуск", "📁 Start Menu")
+    t(lang, "Меню Пуск", "Start Menu")
 }
 
 pub fn startup_filter_taskscheduler(lang: Language) -> &'static str {
-    t(lang, "⏰ Планировщик", "⏰ Task Scheduler")
+    t(lang, "Планировщик", "Task Scheduler")
 }
 
 pub fn startup_add_btn(lang: Language) -> &'static str {
-    t(lang, "➕ Добавить программу...", "➕ Add program...")
+    t(lang, "Добавить программу...", "Add program...")
 }
 
 pub fn startup_add_btn_tip(lang: Language) -> &'static str {
-    t(lang, "Добавить новое приложение в автозапуск Windows", "Add a new application to Windows startup")
+    t(lang, "Добавить приложение в автозапуск Windows", "Add application to Windows startup")
 }
 
 pub fn startup_col_state(lang: Language) -> &'static str {
@@ -347,26 +347,26 @@ pub fn startup_col_action(lang: Language) -> &'static str {
 }
 
 pub fn startup_status_on(lang: Language) -> &'static str {
-    t(lang, "✔ Вкл", "✔ On")
+    t(lang, "Вкл", "On")
 }
 
 pub fn startup_status_off(lang: Language) -> &'static str {
-    t(lang, "○ Откл", "○ Off")
+    t(lang, "Откл", "Off")
 }
 
 pub fn startup_impact_high(lang: Language) -> &'static str {
-    t(lang, "⚡ Высокое", "⚡ High")
+    t(lang, "Высокое", "High")
 }
 
 pub fn startup_impact_medium(lang: Language) -> &'static str {
-    t(lang, "🟡 Среднее", "🟡 Medium")
+    t(lang, "Среднее", "Medium")
 }
 
 pub fn startup_impact_low(lang: Language) -> &'static str {
-    t(lang, "🟢 Низкое", "🟢 Low")
+    t(lang, "Низкое", "Low")
 }
 
 pub fn startup_impact_none(lang: Language) -> &'static str {
-    t(lang, "⚪ Не измерено", "⚪ Not measured")
+    t(lang, "Не измерено", "Not measured")
 }
 

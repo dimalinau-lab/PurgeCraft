@@ -68,7 +68,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 let batch_size: u64 = selected_apps_vec.iter().map(|a| a.size_bytes).sum();
 
                 let batch_heading_color = if app.dark_mode { heading_color } else { Color32::from_rgb(2, 132, 199) };
-                ui.heading(RichText::new(crate::i18n::t(lang, "📦 ПАКЕТНЫЙ РЕЖИМ", "📦 BATCH MODE")).size(15.0).strong().color(batch_heading_color));
+                ui.heading(RichText::new(crate::i18n::t(lang, "Пакетный режим", "Batch mode")).size(15.0).color(batch_heading_color));
                 ui.add_space(8.0);
 
                 let batch_count_text = format!("{}: {}", crate::i18n::t(lang, "Выбрано программ", "Programs selected"), batch_count);
@@ -76,9 +76,9 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 let batch_size_text = format!("{}: {}", crate::i18n::t(lang, "Общий объем", "Total size"), format_size_lang(batch_size, lang));
                 ui.label(RichText::new(batch_size_text).color(meta_label_color));
 
-                ui.add_space(14.0);
+                ui.add_space(16.0);
                 ui.separator();
-                ui.add_space(10.0);
+                ui.add_space(8.0);
 
                 // Batch Uninstall Button
                 let (batch_btn_fill, batch_btn_stroke) = if app.dark_mode {
@@ -86,7 +86,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                 } else {
                     (Color32::from_rgb(37, 99, 235), Stroke::NONE)
                 };
-                let batch_uninst_title = format!("🗑 {} ({})", crate::i18n::t(lang, "Пакетное удаление", "Batch Uninstall"), batch_count);
+                let batch_uninst_title = format!("{} ({})", crate::i18n::t(lang, "Пакетное удаление", "Batch uninstall"), batch_count);
                 let batch_uninst_btn = egui::Button::new(
                     RichText::new(batch_uninst_title).size(14.0).strong().color(Color32::WHITE)
                 )
@@ -98,10 +98,10 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     app.start_batch_uninstall();
                 }
 
-                ui.add_space(6.0);
+                ui.add_space(8.0);
 
                 // Batch Force Removal Button
-                let batch_force_title = format!("⚠ {} ({})", crate::i18n::t(lang, "Пакетная зачистка", "Batch Force Removal"), batch_count);
+                let batch_force_title = format!("{} ({})", crate::i18n::t(lang, "Пакетная зачистка", "Batch force removal"), batch_count);
                 let batch_force_btn = egui::Button::new(
                     RichText::new(batch_force_title)
                         .size(13.0)
@@ -116,8 +116,8 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     app.start_batch_force_removal();
                 }
 
-                ui.add_space(10.0);
-                if ui.button(crate::i18n::t(lang, "✕ Снять выбор со всех", "✕ Deselect All")).clicked() {
+                ui.add_space(8.0);
+                if ui.button(crate::i18n::t(lang, "Снять выбор со всех", "Deselect all")).clicked() {
                     app.batch_selected.clear();
                 }
 
@@ -229,8 +229,8 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     let is_traced = app.traced_apps.iter().any(|t| t.name.eq_ignore_ascii_case(&a_item.name) || t.id == a_item.id);
                     if is_traced {
                         ui.label(RichText::new(crate::i18n::t(lang, "Монитор:", "Tracker:")).color(meta_label_color));
-                        let trace_label = crate::i18n::t(lang, "⚡ Отслежено", "⚡ Traced");
-                        let trace_tip = crate::i18n::t(lang, "Все компоненты программы зафиксированы при установке (100% чистый снос)", "All components logged during installation (100% clean uninstall)");
+                        let trace_label = crate::i18n::t(lang, "Отслежено", "Traced");
+                        let trace_tip = crate::i18n::t(lang, "Компоненты зафиксированы монитором установки", "Components logged by install monitor");
                         ui.label(RichText::new(trace_label).color(Color32::from_rgb(234, 179, 8)).strong())
                             .on_hover_text(trace_tip);
                         ui.end_row();
@@ -248,7 +248,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                     (Color32::from_rgb(37, 99, 235), Stroke::NONE)
                 };
                 let uninst_title = if a_item.source_badge == "[Portable]" {
-                    crate::i18n::t(lang, "🗑 Удалить Portable-папку", "🗑 Delete Portable Folder")
+                    crate::i18n::t(lang, "Удалить папку программы", "Delete program folder")
                 } else {
                     crate::i18n::btn_uninstall(lang)
                 };
@@ -335,7 +335,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
             }
 
             if filtered_indices.is_empty() {
-                ui.add_space(30.0);
+                ui.add_space(32.0);
                 ui.vertical_centered(|ui| {
                     ui.label(RichText::new(crate::i18n::not_found_title(lang)).size(16.0).color(Color32::from_rgb(100, 116, 139)));
                     ui.label(crate::i18n::not_found_hint(lang));
@@ -482,15 +482,15 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                                          remove_entry: &mut Option<InstalledApp>,
                                                          dismiss_single: &mut Option<String>,
                                                          dismiss_all: &mut bool| {
-                                if ui.button(crate::i18n::t(lang, "🗑 Деинсталляция...", "🗑 Uninstall...")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Деинсталляция...", "Uninstall...")).clicked() {
                                     *uninst = Some(target_app.clone());
                                     ui.close_menu();
                                 }
-                                if ui.button(crate::i18n::t(lang, "⚠ Принудительное удаление...", "⚠ Force Removal...")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Принудительное удаление...", "Force removal...")).clicked() {
                                     *force = Some(target_app.clone());
                                     ui.close_menu();
                                 }
-                                if ui.button(crate::i18n::t(lang, "❌ Удалить запись из списка...", "❌ Remove Entry from List...")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Удалить запись из списка...", "Remove entry from list...")).clicked() {
                                     *remove_entry = Some(target_app.clone());
                                     ui.close_menu();
                                 }
@@ -509,20 +509,20 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     jump_to_regedit(&target_app.registry_path);
                                     ui.close_menu();
                                 }
-                                if ui.button(crate::i18n::t(lang, "🌐 Искать в Google", "🌐 Search Google")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Искать в Google", "Search on Google")).clicked() {
                                     let url = format!("https://www.google.com/search?q={}+{}", target_app.name, target_app.publisher);
                                     let _ = open::that(url);
                                     ui.close_menu();
                                 }
                                 if target_app.is_new {
                                     ui.separator();
-                                    if ui.button(crate::i18n::t(lang, "✔ Снять отметку «Новое» с этой программы", "✔ Dismiss \"New\" mark for this program")).clicked() {
+                                    if ui.button(crate::i18n::t(lang, "Снять отметку «Новое» с этой программы", "Dismiss \"New\" mark for this program")).clicked() {
                                         *dismiss_single = Some(target_app.id.clone());
                                         ui.close_menu();
                                     }
                                 }
                                 if app.new_apps_count > 0
-                                    && ui.button(crate::i18n::t(lang, "✨ Сбросить все отметки «Новое»", "✨ Dismiss all \"New\" marks")).clicked()
+                                    && ui.button(crate::i18n::t(lang, "Сбросить все отметки «Новое»", "Dismiss all \"New\" marks")).clicked()
                                 {
                                     *dismiss_all = true;
                                     ui.close_menu();
@@ -570,7 +570,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     }
 
                                     if app.settings.highlight_recent && item_app.is_new {
-                                        let new_tag = crate::i18n::t(lang, "✨ НОВОЕ", "✨ NEW");
+                                        let new_tag = crate::i18n::t(lang, "Новое", "New");
                                         let new_tip = crate::i18n::t(lang, "Недавно установленная программа", "Recently installed application");
                                         ui.colored_label(Color32::from_rgb(234, 179, 8), new_tag)
                                             .on_hover_text(new_tip);
@@ -579,7 +579,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     let is_traced = app.traced_apps.iter().any(|t| t.name.eq_ignore_ascii_case(&item_app.name) || t.id == item_app.id);
                                     if is_traced {
                                         let trace_tip = crate::i18n::t(lang, "Установка отслежена с помощью PurgeCraft Install Tracker", "Installation monitored with PurgeCraft Install Tracker");
-                                        ui.label(RichText::new("⚡").color(Color32::from_rgb(234, 179, 8)).strong())
+                                        ui.label(RichText::new("●").color(Color32::from_rgb(234, 179, 8)).strong())
                                             .on_hover_text(trace_tip);
                                     }
 
@@ -595,7 +595,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                         egui::Frame::none()
                                             .fill(badge_bg)
                                             .rounding(3.0)
-                                            .inner_margin(egui::Margin::symmetric(5.0, 1.5))
+                                            .inner_margin(egui::Margin::symmetric(6.0, 2.0))
                                             .show(ui, |ui| {
                                                 ui.label(RichText::new(&item_app.source_badge).size(11.0).strong().color(badge_text_color));
                                             });
@@ -650,7 +650,7 @@ pub fn render_uninstaller_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                             let (_, resp5) = row.col(|ui| {
                                 let is_traced = app.traced_apps.iter().any(|t| t.name.eq_ignore_ascii_case(&item_app.name) || t.id == item_app.id);
                                 let tag = if is_traced {
-                                    crate::i18n::t(lang, "⚡ Отслежено", "⚡ Traced")
+                                    crate::i18n::t(lang, "Отслежено", "Traced")
                                 } else if item_app.is_uwp {
                                     "Store"
                                 } else if item_app.is_64bit {

@@ -42,7 +42,7 @@ pub fn render_startup_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             if filtered_indices.is_empty() {
                 ui.vertical_centered(|ui| {
-                    ui.add_space(60.0);
+                    ui.add_space(64.0);
                     ui.label(RichText::new(crate::i18n::t(lang, "Записей автозагрузки не найдено", "No startup items found")).size(16.0).color(Color32::from_rgb(100, 116, 139)));
                     ui.label(crate::i18n::not_found_hint(lang));
                 });
@@ -91,8 +91,7 @@ pub fn render_startup_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                 let toggle_btn = egui::Button::new(RichText::new(label_text).color(btn_color).strong().size(12.0))
                                     .fill(btn_fill)
                                     .min_size(Vec2::new(72.0, 22.0));
-                                let toggle_tip = crate::i18n::t(lang, "Нажмите для включения/отключения автозапуска", "Click to enable/disable startup");
-                                if ui.add(toggle_btn).on_hover_text(toggle_tip).clicked() {
+                                if ui.add(toggle_btn).clicked() {
                                     to_toggle = Some(orig_idx);
                                 }
                             });
@@ -103,16 +102,16 @@ pub fn render_startup_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                             });
                             resp1.context_menu(|ui| {
                                 let toggle_menu_title = if item.is_enabled {
-                                    crate::i18n::t(lang, "○ Отключить автозапуск", "○ Disable startup")
+                                    crate::i18n::t(lang, "Отключить автозапуск", "Disable startup")
                                 } else {
-                                    crate::i18n::t(lang, "✔ Включить автозапуск", "✔ Enable startup")
+                                    crate::i18n::t(lang, "Включить автозапуск", "Enable startup")
                                 };
                                 if ui.button(toggle_menu_title).clicked() {
                                     to_toggle = Some(orig_idx);
                                     ui.close_menu();
                                 }
                                 ui.separator();
-                                if ui.button(crate::i18n::t(lang, "📁 Открыть расположение файла", "📁 Open file location")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Открыть расположение файла", "Open file location")).clicked() {
                                     let exe_part = crate::types::extract_exe_prefix(&item.command);
                                     if let Some(parent) = std::path::Path::new(exe_part).parent() {
                                         let _ = open::that(parent);
@@ -120,7 +119,7 @@ pub fn render_startup_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     ui.close_menu();
                                 }
                                 if item.source_type.contains("run")
-                                    && ui.button(crate::i18n::t(lang, "🗄 Открыть ключ в реестре", "🗄 Open registry key")).clicked()
+                                    && ui.button(crate::i18n::t(lang, "Открыть ключ в реестре", "Open registry key")).clicked()
                                 {
                                     let sub_hive = if item.source_type.starts_with("hklm") { "HKLM" } else { "HKCU" };
                                     let key_name = if item.source_type.contains("runonce") { "RunOnce" } else { "Run" };
@@ -129,7 +128,7 @@ pub fn render_startup_tab(app: &mut PurgeCraftApp, ui: &mut egui::Ui) {
                                     ui.close_menu();
                                 }
                                 ui.separator();
-                                if ui.button(crate::i18n::t(lang, "❌ Удалить из автозагрузки", "❌ Remove from startup")).clicked() {
+                                if ui.button(crate::i18n::t(lang, "Удалить из автозагрузки", "Remove from startup")).clicked() {
                                     to_delete = Some(orig_idx);
                                     ui.close_menu();
                                 }

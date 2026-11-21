@@ -49,10 +49,10 @@ impl StartupImpact {
     #[allow(dead_code)]
     pub fn label(&self) -> &'static str {
         match self {
-            StartupImpact::High => "⚡ Высокое",
-            StartupImpact::Medium => "🟡 Среднее",
-            StartupImpact::Low => "🟢 Низкое",
-            StartupImpact::None => "⚪ Не измерено",
+            StartupImpact::High => "Высокое",
+            StartupImpact::Medium => "Среднее",
+            StartupImpact::Low => "Низкое",
+            StartupImpact::None => "Не измерено",
         }
     }
 }

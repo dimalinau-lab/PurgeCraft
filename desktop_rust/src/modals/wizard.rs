@@ -17,7 +17,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_wizard",
-        format!("{} {} — {}", crate::i18n::t(lang, "Удаление остатков", "Leftovers Removal"), app.wizard_app_title, crate::i18n::t(lang, "Мастер Удаления ™", "Removal Wizard ™")),
+        format!("{}: {}", crate::i18n::t(lang, "Удаление остатков", "Leftovers removal"), app.wizard_app_title),
         None,
         egui::vec2(620.0, 410.0),
         egui::vec2(380.0, 250.0),
@@ -29,7 +29,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
             match app.wizard_phase {
                 WizardPhase::Scanning => {
-                    ui.heading(RichText::new(crate::i18n::t(lang, "Сканирование оставшихся файлов/папок, элементов реестра...", "Scanning for leftover files/folders, registry entries...")).size(15.0).strong());
+                    ui.heading(RichText::new(crate::i18n::t(lang, "Сканирование оставшихся файлов/папок, элементов реестра...", "Scanning for leftover files/folders, registry entries...")).size(15.0));
                     ui.add_space(8.0);
                     ui.label(RichText::new(truncate_chars(&app.wizard_scan_current_path, 75)).monospace().small());
                     ui.add_space(12.0);
@@ -49,7 +49,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     });
                 }
                 WizardPhase::Review => {
-                    ui.label(RichText::new(format!("{} '{}'", crate::i18n::t(lang, "Принудительное удаление", "Force removal of"), app.wizard_app_title)).heading().strong());
+                    ui.label(RichText::new(format!("{} '{}'", crate::i18n::t(lang, "Принудительное удаление", "Force removal of"), app.wizard_app_title)).heading());
                     ui.add_space(4.0);
                     ui.label(crate::i18n::t(
                         lang,
@@ -60,7 +60,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
 
                     // Action buttons top row
                     ui.horizontal(|ui| {
-                        if ui.button(crate::i18n::t(lang, "📄 Экспортировать в XML", "📄 Export to XML"))
+                        if ui.button(crate::i18n::t(lang, "Экспортировать в XML", "Export to XML"))
                             .on_hover_text(crate::i18n::t(lang, "Экспортировать список остатков в XML-файл", "Export leftover list to an XML file"))
                             .clicked()
                         {
@@ -120,21 +120,22 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             } else {
                                 if !fs_traces.is_empty() {
                                     let fs_size: u64 = fs_traces.iter().map(|t| t.size_bytes).sum();
-                                    ui.strong(format!("🗀 {} ({} {}, {})", crate::i18n::t(lang, "Файловая система", "File system"), fs_traces.len(), crate::i18n::t(lang, "элементов", "items"), format_size_lang(fs_size, lang)));
+                                    ui.strong(format!("{} ({} {}, {})", crate::i18n::t(lang, "Файловая система", "File system"), fs_traces.len(), crate::i18n::t(lang, "элементов", "items"), format_size_lang(fs_size, lang)));
                                     for t in &mut app.wizard_traces {
                                         if t.trace_type != "registry_key" {
-                                            let icon = if t.trace_type == "folder" { "📁" } else { "📄" };
-                                            render_trace_row(ui, &mut t.selected, format!("{} {}", icon, t.path), &t.path);
+                                            let prefix = if t.trace_type == "folder" { crate::i18n::t(lang, "[Папка]", "[Folder]") } else { crate::i18n::t(lang, "[Файл]", "[File]") };
+                                            render_trace_row(ui, &mut t.selected, format!("{} {}", prefix, t.path), &t.path);
                                         }
                                     }
                                 }
 
                                 if !reg_traces.is_empty() {
                                     ui.add_space(6.0);
-                                    ui.strong(format!("🗁 {} ({} {})", crate::i18n::t(lang, "Реестр", "Registry"), reg_traces.len(), crate::i18n::t(lang, "элементов", "items")));
+                                    ui.strong(format!("{} ({} {})", crate::i18n::t(lang, "Реестр", "Registry"), reg_traces.len(), crate::i18n::t(lang, "элементов", "items")));
                                     for t in &mut app.wizard_traces {
                                         if t.trace_type == "registry_key" {
-                                            render_trace_row(ui, &mut t.selected, format!("🗄 {}", t.path), &t.path);
+                                            let prefix = crate::i18n::t(lang, "[Реестр]", "[Registry]");
+                                            render_trace_row(ui, &mut t.selected, format!("{} {}", prefix, t.path), &t.path);
                                         }
                                     }
                                 }
@@ -189,7 +190,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     ui.label(RichText::new(truncate_chars(&app.wizard_scan_current_path, 75)).size(11.0).monospace().color(sub_color));
                 }
                 WizardPhase::Finished => {
-                    ui.heading(RichText::new(crate::i18n::t(lang, "✔ Все остатки программы удалены", "✔ All leftover traces deleted")).size(16.0).strong().color(Color32::from_rgb(34, 197, 94)));
+                    ui.heading(RichText::new(crate::i18n::t(lang, "Все остатки программы удалены", "All leftover traces deleted")).size(16.0).color(Color32::from_rgb(34, 197, 94)));
                     ui.add_space(8.0);
                     ui.label(format!("{} «{}» {}", crate::i18n::t(lang, "Программа", "Program"), app.wizard_app_title, crate::i18n::t(lang, "успешно удалена с вашего компьютера.", "has been successfully removed from your computer.")));
                     if let Some(rep) = &app.wizard_report {
@@ -198,18 +199,17 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     }
                     ui.add_space(10.0);
 
-                    // Scrollable list of deleted items in bright green with checkmarks
+                    // Scrollable list of deleted items in bright green
                     let list_h = super::fill_scroll_height(ui, 48.0, 80.0);
                     egui::ScrollArea::vertical().max_height(list_h).auto_shrink([false, false]).show(ui, |ui| {
                         for trace in app.wizard_traces.iter().filter(|t| t.selected) {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("✔").color(Color32::from_rgb(34, 197, 94)).strong());
-                                let icon = match trace.trace_type.as_str() {
-                                    "registry_key" => "🗄",
-                                    "folder" => "📁",
-                                    _ => "📄",
+                                let prefix = match trace.trace_type.as_str() {
+                                    "registry_key" => crate::i18n::t(lang, "[Реестр]", "[Registry]"),
+                                    "folder" => crate::i18n::t(lang, "[Папка]", "[Folder]"),
+                                    _ => crate::i18n::t(lang, "[Файл]", "[File]"),
                                 };
-                                ui.add(egui::Label::new(RichText::new(format!("{} {}", icon, trace.path)).color(Color32::from_rgb(34, 197, 94)).size(11.0)).truncate())
+                                ui.add(egui::Label::new(RichText::new(format!("{} {}", prefix, trace.path)).color(Color32::from_rgb(34, 197, 94)).size(11.0)).truncate())
                                     .on_hover_text(&trace.path);
                             });
                         }
@@ -251,7 +251,7 @@ pub fn render_wizard_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         app.wizard_delete_rx = None;
         app.wizard_xml_status = None;
         let total_size: u64 = app.apps.iter().map(|a| a.size_bytes).sum();
-        app.status_msg = format!("{}: {} | {}: {}", crate::i18n::t(lang, "Программ", "Programs"), app.apps.len(), crate::i18n::t(lang, "Общий объем", "Total size"), format_size_lang(total_size, lang));
+        app.status_msg = format!("{} {}, {}", app.apps.len(), crate::i18n::t(lang, "программ", "programs"), format_size_lang(total_size, lang));
         if let Some(idx) = app.selected_app_idx {
             if idx >= app.apps.len() {
                 app.selected_app_idx = if !app.apps.is_empty() { Some(0) } else { None };

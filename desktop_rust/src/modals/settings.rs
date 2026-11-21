@@ -17,7 +17,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
     let outcome = super::show_detachable_window(
         ctx,
         "modal_settings",
-        crate::i18n::t(lang, "⚙ Настройки", "⚙ Settings"),
+        crate::i18n::t(lang, "Настройки", "Settings"),
         None,
         egui::vec2(520.0, 405.0),
         egui::vec2(360.0, 300.0),
@@ -28,7 +28,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
         |ui, active_ctx| {
             // 1. Top Tab Bar
             ui.horizontal(|ui| {
-                let tab_btn = |ui: &mut egui::Ui, is_sel: bool, icon: &str, label: &str| -> egui::Response {
+                let tab_btn = |ui: &mut egui::Ui, is_sel: bool, label: &str| -> egui::Response {
                     let (fill, stroke, text_color) = if is_sel {
                         (
                             if app.dark_mode { Color32::from_rgb(45, 48, 56) } else { Color32::from_rgb(224, 242, 254) },
@@ -44,7 +44,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                     };
                     let tab_w = ((ui.available_width() - 12.0) / 3.0).floor().max(75.0);
                     let btn = egui::Button::new(
-                        RichText::new(format!("{} {}", icon, label)).strong().color(text_color)
+                        RichText::new(label).strong().color(text_color)
                     )
                     .fill(fill)
                     .stroke(stroke)
@@ -56,13 +56,13 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                 let tab_interface = crate::i18n::t(lang, "Интерфейс", "Interface");
                 let tab_uninstaller = crate::i18n::t(lang, "Деинсталлятор", "Uninstaller");
 
-                if tab_btn(ui, app.settings_tab == SettingsTab::General, "📁", tab_general).clicked() {
+                if tab_btn(ui, app.settings_tab == SettingsTab::General, tab_general).clicked() {
                     app.settings_tab = SettingsTab::General;
                 }
-                if tab_btn(ui, app.settings_tab == SettingsTab::Interface, "🖥", tab_interface).clicked() {
+                if tab_btn(ui, app.settings_tab == SettingsTab::Interface, tab_interface).clicked() {
                     app.settings_tab = SettingsTab::Interface;
                 }
-                if tab_btn(ui, app.settings_tab == SettingsTab::Uninstaller, "📦", tab_uninstaller).clicked() {
+                if tab_btn(ui, app.settings_tab == SettingsTab::Uninstaller, tab_uninstaller).clicked() {
                     app.settings_tab = SettingsTab::Uninstaller;
                 }
             });
@@ -126,7 +126,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                             let repo_label = crate::i18n::t(lang, "Репозиторий GitHub:", "GitHub Repository:");
                             ui.label(repo_label);
                             ui.add(egui::TextEdit::singleline(&mut app.temp_settings.github_repo).desired_width(185.0));
-                            let check_btn_label = crate::i18n::t(lang, "🔍 Проверить сейчас", "🔍 Check now");
+                            let check_btn_label = crate::i18n::t(lang, "Проверить сейчас", "Check now");
                             if ui.button(check_btn_label).clicked() {
                                 autoupdater::check_for_updates_async(
                                     app.temp_settings.github_repo.clone(),
@@ -184,9 +184,9 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
                             let options = [
-                                ("dark", crate::i18n::t(lang, "🌙 Темная", "🌙 Dark")),
-                                ("light", crate::i18n::t(lang, "☀ Светлая", "☀ Light")),
-                                ("system", crate::i18n::t(lang, "🖥 Системная", "🖥 System")),
+                                ("dark", crate::i18n::t(lang, "Темная", "Dark")),
+                                ("light", crate::i18n::t(lang, "Светлая", "Light")),
+                                ("system", crate::i18n::t(lang, "Системная", "System")),
                             ];
                             for (mode, label) in options {
                                 let is_sel = app.temp_settings.theme_mode == mode
@@ -310,7 +310,7 @@ pub fn render_settings_modal(app: &mut PurgeCraftApp, ctx: &egui::Context) {
             // 3. Bottom Button Row (Harmonious unified sizes)
             let btn_size = Vec2::new(92.0, 28.0);
             ui.horizontal(|ui| {
-                let help_btn_text = crate::i18n::t(lang, "❓ Помощь", "❓ Help");
+                let help_btn_text = crate::i18n::t(lang, "Помощь", "Help");
                 let help_btn_tip = crate::i18n::t(lang, "Открыть документацию PurgeCraft на GitHub", "Open PurgeCraft documentation on GitHub");
                 let help_btn = egui::Button::new(RichText::new(help_btn_text).strong())
                     .min_size(btn_size);
